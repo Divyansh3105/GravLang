@@ -17,6 +17,7 @@ from lexer import Lexer
 from parser import Parser
 from interpreter import Interpreter
 from errors import GravLangError
+from grav_builtins import register_builtins
 
 
 def run_file(path: str) -> None:
@@ -39,7 +40,6 @@ def run_file(path: str) -> None:
     except RecursionError:
         print("❌ Runtime Error: Stack overflow — maximum recursion depth exceeded")
         sys.exit(1)
-
 
 def main():
     if len(sys.argv) > 1:

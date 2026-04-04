@@ -132,6 +132,16 @@ class Interpreter:
                 raise GravLangRuntimeError("Division by zero", node.line,
                                            self._get_source_line(node.line))
             result = current / new_val
+        elif node.op == "//":  # FIXED: added //= augmented floor-div support
+            if new_val == 0:
+                raise GravLangRuntimeError("Division by zero", node.line,
+                                           self._get_source_line(node.line))
+            result = current // new_val
+        elif node.op == "%":   # FIXED: added %= augmented modulo support
+            if new_val == 0:
+                raise GravLangRuntimeError("Modulo by zero", node.line,
+                                           self._get_source_line(node.line))
+            result = current % new_val
         else:
             raise GravLangRuntimeError(f"Unknown augmented operator: {node.op}", node.line)
         env.assign(node.name, result)
@@ -256,7 +266,12 @@ class Interpreter:
         raise GravLangRuntimeError(f"Unknown unary operator: {node.op}", node.line)
 
     def _visit_BinOp(self, node: ast.BinOp, env: Environment):
-        # Short-circuit logical operators
+        # FIXED: documented that and/or return the last evaluated value
+        # (Python-style short-circuit), NOT a boolean.  e.g.:
+        #   0 and "hi"  → 0      (falsy left returned)
+        #   1 and "hi"  → "hi"   (right returned)
+        #   0 or  "hi"  → "hi"   (right returned)
+        #   1 or  "hi"  → 1      (truthy left returned)
         if node.op == "and":
             left = self._exec(node.left, env)
             return self._exec(node.right, env) if self._truthy(left) else left
@@ -340,8 +355,17 @@ class Interpreter:
     def _visit_ArrayIndex(self, node: ast.ArrayIndex, env: Environment):
         array = self._exec(node.array, env)
         index = self._exec(node.index, env)
+        if isinstance(array, str):  # FIXED: support string indexing
+            if not isinstance(index, int):
+                raise GravLangRuntimeError("String index must be an integer", node.line)
+            try:
+                return array[index]  # FIXED: return single-character string
+            except IndexError:
+                raise GravLangRuntimeError(
+                    f"String index {index} out of range (length {len(array)})", node.line,
+                )
         if not isinstance(array, list):
-            raise GravLangRuntimeError("Indexing requires an array", node.line)
+            raise GravLangRuntimeError("Indexing requires an array or string", node.line)  # FIXED: updated error msg
         if not isinstance(index, int):
             raise GravLangRuntimeError("Array index must be an integer", node.line)
         try:

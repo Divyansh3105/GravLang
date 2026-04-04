@@ -1,369 +1,1998 @@
 """
-GravLang — Tkinter GUI IDE.
-
-Split-pane layout:
-  LEFT   → code editor with line numbers and syntax highlighting
-  RIGHT  → read-only output panel
-  TOP    → toolbar with Run, Clear, Load, Save buttons
-  BOTTOM → status bar (line:col, total lines, state)
+GravLang IDE — VS Code–style GUI
+Built with Python 3.10+ / tkinter only
 """
 
-from __future__ import annotations
 import tkinter as tk
-from tkinter import filedialog, font as tkfont
-import re
+from tkinter import ttk, filedialog, messagebox
+import os, json, time, threading, re
+from datetime import datetime
 
-from lexer import Lexer
-from parser import Parser
-from interpreter import Interpreter
-from errors import GravLangError
+# ─────────────────────────────────────────────────────────────────────────────
+#  TRY to import GravLang components; fall back to stubs for standalone testing
+# ─────────────────────────────────────────────────────────────────────────────
+try:
+    from lexer import Lexer
+    from parser import Parser
+    from interpreter import Interpreter
+    from errors import GravLangError
+    HAS_GRAVLANG = True
+except ImportError:
+    HAS_GRAVLANG = False
+
+    class GravLangError(Exception):
+        pass
+
+    class _FakeEnv:
+        _store = {}
+
+    class Interpreter:
+        def __init__(self, print_fn=None, source=""):
+            self.global_env = _FakeEnv()
+            self._print_fn = print_fn or print
+
+        def interpret(self, tree):
+            self._print_fn("GravLang runtime not found.\nRunning in demo mode.")
+
+    class Lexer:
+        def __init__(self, src): pass
+        def tokenize(self): return []
+
+    class Parser:
+        def __init__(self, tokens): pass
+        def parse(self): return None
 
 
-# ── Keyword sets for highlighting ────────────────────────────────────
-
-KEYWORDS = {
-    "let", "if", "elif", "else", "while", "for",
-    "func", "return", "and", "or", "not", "true", "false", "print",
-    "class", "extends", "self",
-    "break", "continue", "null", "in",
+# ─────────────────────────────────────────────────────────────────────────────
+#  THEMES
+# ─────────────────────────────────────────────────────────────────────────────
+THEMES = {
+    "Catppuccin Mocha": dict(
+        BG_BASE="#1e1e2e", BG_MANTLE="#181825", BG_CRUST="#11111b",
+        BG_SURFACE0="#313244", BG_SURFACE1="#45475a",
+        TEXT_MAIN="#cdd6f4", TEXT_SUB="#585b70", TEXT_OVERLAY="#7f849c",
+        BLUE="#89b4fa", TEAL="#94e2d5", GREEN="#a6e3a1",
+        MAUVE="#cba6f7", PEACH="#fab387", RED="#f38ba8", LAVENDER="#b4befe",
+        STATUS_BG="#89b4fa", STATUS_FG="#1e1e2e",
+        FG_CURSOR="#f5e0dc",
+    ),
+    "GitHub Dark": dict(
+        BG_BASE="#0d1117", BG_MANTLE="#161b22", BG_CRUST="#010409",
+        BG_SURFACE0="#21262d", BG_SURFACE1="#30363d",
+        TEXT_MAIN="#e6edf3", TEXT_SUB="#484f58", TEXT_OVERLAY="#8b949e",
+        BLUE="#79c0ff", TEAL="#39d353", GREEN="#3fb950",
+        MAUVE="#d2a8ff", PEACH="#ffa657", RED="#ff7b72", LAVENDER="#a5d6ff",
+        STATUS_BG="#1f6feb", STATUS_FG="#ffffff",
+        FG_CURSOR="#f0f6fc",
+    ),
+    "Solarized Dark": dict(
+        BG_BASE="#002b36", BG_MANTLE="#073642", BG_CRUST="#001f27",
+        BG_SURFACE0="#094652", BG_SURFACE1="#0a5160",
+        TEXT_MAIN="#839496", TEXT_SUB="#3d6b74", TEXT_OVERLAY="#586e75",
+        BLUE="#268bd2", TEAL="#2aa198", GREEN="#859900",
+        MAUVE="#6c71c4", PEACH="#cb4b16", RED="#dc322f", LAVENDER="#b58900",
+        STATUS_BG="#268bd2", STATUS_FG="#fdf6e3",
+        FG_CURSOR="#fdf6e3",
+    ),
+    "Catppuccin Latte": dict(
+        BG_BASE="#eff1f5", BG_MANTLE="#e6e9ef", BG_CRUST="#dce0e8",
+        BG_SURFACE0="#ccd0da", BG_SURFACE1="#bcc0cc",
+        TEXT_MAIN="#4c4f69", TEXT_SUB="#9ca0b0", TEXT_OVERLAY="#8c8fa1",
+        BLUE="#1e66f5", TEAL="#179299", GREEN="#40a02b",
+        MAUVE="#8839ef", PEACH="#fe640b", RED="#d20f39", LAVENDER="#7287fd",
+        STATUS_BG="#1e66f5", STATUS_FG="#eff1f5",
+        FG_CURSOR="#4c4f69",
+    ),
 }
 
-BUILTINS = {
-    "input", "len", "type", "toInt", "toFloat", "toString",
-    "push", "pop", "remove", "contains", "reverse", "sort", "hasAttr",
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), ".gravlang_config.json")
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  SAMPLE PROGRAMS
+# ─────────────────────────────────────────────────────────────────────────────
+SAMPLES = {
+    "Hello World": '# Hello World\nprint("Hello, World!");\n',
+
+    "Fibonacci": '''\
+# Fibonacci sequence
+func fib(n) {
+    if (n <= 1) { return n; }
+    return fib(n - 1) + fib(n - 2);
 }
 
+let i = 0;
+while (i < 10) {
+    print(fib(i));
+    i = i + 1;
+}
+''',
+    "FizzBuzz": '''\
+# FizzBuzz
+let i = 1;
+while (i <= 20) {
+    if (i % 15 == 0) { print("FizzBuzz"); }
+    elif (i % 3 == 0) { print("Fizz"); }
+    elif (i % 5 == 0) { print("Buzz"); }
+    else { print(i); }
+    i = i + 1;
+}
+''',
+    "Bubble Sort": '''\
+# Bubble Sort
+func bubbleSort(arr) {
+    let n = len(arr);
+    let i = 0;
+    while (i < n) {
+        let j = 0;
+        while (j < n - i - 1) {
+            if (arr[j] > arr[j + 1]) {
+                let tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    return arr;
+}
 
-# ── GUI Application ─────────────────────────────────────────────────
+let nums = [64, 34, 25, 12, 22, 11, 90];
+bubbleSort(nums);
+print(toString(nums));
+''',
+    "Stack Class": '''\
+# Stack Class
+class Stack {
+    func init() {
+        self.items = [];
+    }
+    func push(item) {
+        push(self.items, item);
+    }
+    func pop() {
+        return pop(self.items);
+    }
+    func peek() {
+        return self.items[len(self.items) - 1];
+    }
+    func isEmpty() {
+        return len(self.items) == 0;
+    }
+    func size() {
+        return len(self.items);
+    }
+}
 
-class GravLangIDE:
-    """Tkinter-based IDE for GravLang."""
+let s = Stack();
+s.push(1);
+s.push(2);
+s.push(3);
+print(s.peek());
+print(s.pop());
+print(s.size());
+''',
+    "Calculator Class": '''\
+# Simple Calculator
+class Calculator {
+    func init() {
+        self.result = 0;
+    }
+    func add(n) { self.result = self.result + n; return self; }
+    func sub(n) { self.result = self.result - n; return self; }
+    func mul(n) { self.result = self.result * n; return self; }
+    func reset() { self.result = 0; return self; }
+    func display() { print(self.result); }
+}
 
-    # ── colour palette ──────────────────────────────────────────────
-    BG_DARK   = "#1e1e2e"
-    BG_PANEL  = "#181825"
-    BG_EDITOR = "#1e1e2e"
-    BG_OUTPUT = "#11111b"
-    FG_TEXT   = "#cdd6f4"
-    FG_LINENO = "#585b70"
-    FG_CURSOR = "#f5e0dc"
-    ACCENT    = "#89b4fa"        # blue   (keywords)
-    ACCENT2   = "#a6e3a1"       # green  (output)
-    ACCENT3   = "#f38ba8"       # red    (errors / booleans)
-    ACCENT4   = "#fab387"       # peach  (strings)
-    ACCENT5   = "#cba6f7"       # mauve  (numbers / augmented ops)
-    ACCENT6   = "#94e2d5"       # teal   (builtins)
-    BORDER    = "#313244"
-    BTN_BG    = "#313244"
-    BTN_FG    = "#cdd6f4"
-    BTN_HOVER = "#45475a"
+let calc = Calculator();
+calc.add(10).mul(3).sub(5).display();
+''',
+    "For-In Loop Demo": '''\
+# For-In Loop demo
+let fruits = ["apple", "banana", "cherry", "date"];
+for (f in fruits) {
+    print("Fruit: " + f);
+}
 
-    def __init__(self, root: tk.Tk):
-        self.root = root
-        self._configure_root()
-        self._build_toolbar()
-        self._build_panes()
-        self._build_status_bar()
-        self._setup_tags()
-        self._bind_events()
-        # Initial placeholder
-        self.editor.insert("1.0", "# Welcome to GravLang!\n# Write your code here and press Run.\n\n")
-        self._update_line_numbers()
-        self._highlight()
-        self._update_status()
+let nums = [5, 3, 8, 1, 9, 2];
+sort(nums);
+print(toString(nums));
+''',
+    "Animals (Final Test)": '''\
+class Animal {
+    func init(name, sound) {
+        self.name = name;
+        self.sound = sound;
+    }
+    func speak() {
+        print(self.name + " says " + self.sound);
+    }
+}
 
-    # ── root window ──────────────────────────────────────────────────
+let animals = [
+    Animal("Cat", "meow"),
+    Animal("Dog", "woof"),
+    Animal("Cow", "moo"),
+];
 
-    def _configure_root(self):
-        self.root.title("GravLang IDE")
-        self.root.configure(bg=self.BG_DARK)
-        self.root.geometry("1100x650")
-        self.root.minsize(800, 500)
+for (a in animals) {
+    a.speak();
+}
 
-        self.mono = tkfont.Font(family="Consolas", size=12)
-        self.mono_small = tkfont.Font(family="Consolas", size=11)
-        self.ui_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+let nums = [5, 3, 8, 1, 9, 2];
+sort(nums);
+print(toString(nums));
+''',
+}
 
-    # ── toolbar ──────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+#  KEYWORDS for syntax highlighting
+# ─────────────────────────────────────────────────────────────────────────────
+KEYWORDS   = r'\b(let|if|else|while|for|in|func|return|class|extends|import|new|null|and|or|not)\b'
+BUILTINS   = r'\b(print|len|type|push|pop|sort|toString|range|input|parseInt|parseFloat|append|insert|remove|keys|values|hasKey)\b'
+STRINGS    = r'"(?:[^"\\]|\\.)*"'
+NUMBERS    = r'\b\d+(?:\.\d+)?\b'
+COMMENTS   = r'#.*'
+BOOLEANS   = r'\b(true|false)\b'
+SELF_KW    = r'\bself\b'
+CLASS_NAME = r'(?<=class\s)\w+'
+AUG_OPS    = r'(//=|%=|\+=|-=|\*=|/=)'  # FIXED: added //= and %= for syntax highlighting
 
-    def _build_toolbar(self):
-        bar = tk.Frame(self.root, bg=self.BG_PANEL, pady=6, padx=10)
-        bar.pack(side=tk.TOP, fill=tk.X)
 
-        tk.Label(
-            bar, text="⚛  GravLang IDE", bg=self.BG_PANEL,
-            fg=self.ACCENT, font=("Segoe UI", 13, "bold"),
-        ).pack(side=tk.LEFT, padx=(0, 20))
+# ─────────────────────────────────────────────────────────────────────────────
+#  AUTO-COMPLETE POPUP
+# ─────────────────────────────────────────────────────────────────────────────
+class AutoCompletePopup:
+    COMPLETIONS = [
+        "print", "len", "type", "push", "pop", "sort", "toString",
+        "range", "input", "parseInt", "parseFloat", "append",
+        "let", "if", "else", "while", "for", "in", "func", "return",
+        "class", "extends", "true", "false", "null", "self",
+    ]
 
-        buttons = [
-            ("▶  Run  (F5)",       self._on_run),
-            ("✕  Clear  (Ctrl+L)", self._on_clear),
-            ("📂  Load",           self._on_load),
-            ("💾  Save",           self._on_save),
-        ]
-        for text, cmd in buttons:
-            btn = tk.Button(
-                bar, text=text, command=cmd,
-                bg=self.BTN_BG, fg=self.BTN_FG,
-                activebackground=self.BTN_HOVER,
-                activeforeground=self.BTN_FG,
-                font=self.ui_font, bd=0, padx=14, pady=4,
-                cursor="hand2", relief=tk.FLAT,
-            )
-            btn.pack(side=tk.LEFT, padx=4)
-            btn.bind("<Enter>", lambda e, b=btn: b.config(bg=self.BTN_HOVER))
-            btn.bind("<Leave>", lambda e, b=btn: b.config(bg=self.BTN_BG))
+    def __init__(self, editor_widget):
+        self.editor = editor_widget
+        self.popup  = None
+        self.listbox = None
 
-    # ── editor + output panes ────────────────────────────────────────
-
-    def _build_panes(self):
-        pane = tk.PanedWindow(
-            self.root, orient=tk.HORIZONTAL,
-            bg=self.BORDER, sashwidth=4, bd=0,
+    def show(self, x, y, prefix):
+        matches = [c for c in self.COMPLETIONS if c.startswith(prefix) and c != prefix]
+        if not matches:
+            self.hide()
+            return
+        self.hide()
+        self.popup = tk.Toplevel(self.editor)
+        self.popup.wm_overrideredirect(True)
+        self.popup.geometry(f"+{x}+{y}")
+        self.popup.configure(bg="#313244")
+        self.listbox = tk.Listbox(
+            self.popup, bg="#313244", fg="#cdd6f4",
+            selectbackground="#89b4fa", selectforeground="#1e1e2e",
+            font=("Consolas", 11), relief="flat", borderwidth=1,
+            highlightthickness=1, highlightbackground="#45475a",
+            height=min(len(matches), 8),
         )
-        pane.pack(fill=tk.BOTH, expand=True, padx=6, pady=(0, 0))
+        self.listbox.pack()
+        for m in matches:
+            self.listbox.insert(tk.END, m)
+        self.listbox.select_set(0)
+        self.listbox.bind("<Return>",  self._accept)
+        self.listbox.bind("<Tab>",     self._accept)
+        self.listbox.bind("<Escape>",  lambda e: self.hide())
+        self.listbox.bind("<Double-1>", self._accept)
+        self.popup.bind("<FocusOut>", lambda e: self.hide())
 
-        # ── left: editor with line numbers ──
-        left_frame = tk.Frame(pane, bg=self.BG_EDITOR)
+    def _accept(self, event=None):
+        if not self.listbox: return
+        sel = self.listbox.curselection()
+        if not sel: return
+        word = self.listbox.get(sel[0])
+        self.editor.event_generate("<<AutoComplete>>", data=word)
+        self.hide()
 
-        self.line_numbers = tk.Text(
-            left_frame, width=4, bg=self.BG_PANEL, fg=self.FG_LINENO,
-            font=self.mono_small, bd=0, padx=6, pady=8,
-            state=tk.DISABLED, takefocus=False,
-            selectbackground=self.BG_PANEL, highlightthickness=0,
-        )
-        self.line_numbers.pack(side=tk.LEFT, fill=tk.Y)
+    def navigate(self, direction):
+        if not self.listbox: return
+        cur = self.listbox.curselection()
+        idx = (cur[0] if cur else -1) + direction
+        idx = max(0, min(idx, self.listbox.size() - 1))
+        self.listbox.selection_clear(0, tk.END)
+        self.listbox.select_set(idx)
+        self.listbox.see(idx)
 
-        editor_scroll = tk.Scrollbar(left_frame, bg=self.BG_DARK, troughcolor=self.BG_DARK)
-        editor_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+    def hide(self):
+        if self.popup:
+            self.popup.destroy()
+            self.popup = None
+            self.listbox = None
 
-        self.editor = tk.Text(
-            left_frame, bg=self.BG_EDITOR, fg=self.FG_TEXT,
-            insertbackground=self.FG_CURSOR, font=self.mono,
-            bd=0, padx=8, pady=8, wrap=tk.NONE, undo=True,
-            yscrollcommand=self._sync_scroll, highlightthickness=0,
-            selectbackground="#45475a",
-        )
-        self.editor.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        editor_scroll.config(command=self._on_editor_scroll)
+    def visible(self):
+        return self.popup is not None
 
-        pane.add(left_frame, stretch="always")
 
-        # ── right: output panel ──
-        right_frame = tk.Frame(pane, bg=self.BG_OUTPUT)
+# ─────────────────────────────────────────────────────────────────────────────
+#  FIND & REPLACE BAR
+# ─────────────────────────────────────────────────────────────────────────────
+class FindReplaceBar(tk.Frame):
+    def __init__(self, parent, editor_getter, theme, **kw):
+        super().__init__(parent, **kw)
+        self._editor_getter = editor_getter
+        self.theme = theme
+        self._matches: list = []
+        self._cur_idx: int  = -1
+        self._build()
+        self._apply_theme(theme)
 
-        tk.Label(
-            right_frame, text="OUTPUT", bg=self.BG_OUTPUT,
-            fg=self.FG_LINENO, font=("Segoe UI", 9, "bold"),
-            anchor="w", padx=10, pady=4,
-        ).pack(fill=tk.X)
+    def _build(self):
+        t = self.theme
+        row1 = tk.Frame(self, bg=t["BG_MANTLE"])
+        row1.pack(fill="x", padx=4, pady=2)
 
-        output_scroll = tk.Scrollbar(right_frame, bg=self.BG_DARK, troughcolor=self.BG_DARK)
-        output_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        tk.Label(row1, text="🔍", bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
+                 font=("Segoe UI", 11)).pack(side="left", padx=(4, 0))
+        self.find_var = tk.StringVar()
+        self.find_entry = tk.Entry(row1, textvariable=self.find_var,
+            bg=t["BG_BASE"], fg=t["TEXT_MAIN"], insertbackground=t["FG_CURSOR"],
+            relief="flat", font=("Consolas", 11), width=28,
+            highlightthickness=1, highlightbackground=t["BG_SURFACE1"])
+        self.find_entry.pack(side="left", padx=4)
+        self.find_var.trace_add("write", lambda *_: self._do_find())
 
-        self.output = tk.Text(
-            right_frame, bg=self.BG_OUTPUT, fg=self.ACCENT2,
-            font=self.mono, bd=0, padx=10, pady=6, wrap=tk.WORD,
-            state=tk.DISABLED, highlightthickness=0,
-            selectbackground="#45475a",
-        )
-        self.output.pack(fill=tk.BOTH, expand=True)
-        output_scroll.config(command=self.output.yview)
-        self.output.config(yscrollcommand=output_scroll.set)
+        self._btn(row1, "▲", self._prev_match)
+        self._btn(row1, "▼", self._next_match)
+        self.count_lbl = tk.Label(row1, text="", bg=t["BG_MANTLE"],
+            fg=t["TEXT_SUB"], font=("Segoe UI", 10))
+        self.count_lbl.pack(side="left", padx=4)
+        self._btn(row1, "✕", self.hide)
 
-        pane.add(right_frame, stretch="always")
+        row2 = tk.Frame(self, bg=t["BG_MANTLE"])
+        row2.pack(fill="x", padx=4, pady=(0, 2))
+        tk.Label(row2, text="↩", bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
+                 font=("Segoe UI", 11)).pack(side="left", padx=(4, 0))
+        self.replace_var = tk.StringVar()
+        self.replace_entry = tk.Entry(row2, textvariable=self.replace_var,
+            bg=t["BG_BASE"], fg=t["TEXT_MAIN"], insertbackground=t["FG_CURSOR"],
+            relief="flat", font=("Consolas", 11), width=28,
+            highlightthickness=1, highlightbackground=t["BG_SURFACE1"])
+        self.replace_entry.pack(side="left", padx=4)
+        self._btn(row2, "Replace",     self._replace_one)
+        self._btn(row2, "Replace All", self._replace_all)
 
-    # ── status bar ───────────────────────────────────────────────────
+        self.find_entry.bind("<Return>",  lambda e: self._next_match())
+        self.find_entry.bind("<Escape>",  lambda e: self.hide())
+        self.replace_entry.bind("<Escape>", lambda e: self.hide())
 
-    def _build_status_bar(self):
-        self.status_bar = tk.Label(
-            self.root,
-            text="✓ Ready",
-            bg=self.BG_PANEL,
-            fg=self.FG_LINENO,
-            font=("Segoe UI", 9),
-            anchor="w",
-            padx=10,
-            pady=3,
-        )
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+    def _btn(self, parent, text, cmd):
+        t = self.theme
+        b = tk.Button(parent, text=text, command=cmd,
+            bg=t["BG_MANTLE"], fg=t["TEXT_MAIN"], relief="flat",
+            font=("Segoe UI", 10), padx=6, pady=1,
+            activebackground=t["BG_SURFACE0"], cursor="hand2",
+            bd=0, highlightthickness=0)
+        b.pack(side="left", padx=1)
+        return b
 
-    def _update_status(self, state: str = "✓ Ready"):
-        """Refresh the status bar with cursor position and line count."""
+    def _apply_theme(self, theme):
+        self.theme = theme
+        self.configure(bg=theme["BG_MANTLE"])
+
+    def show(self, replace=False):
+        self.pack(fill="x", side="top")
+        self.find_entry.focus_set()
+        self.find_entry.select_range(0, "end")
+
+    def hide(self):
+        editor = self._editor_getter()
+        if editor:
+            editor.tag_remove("match_hl",  "1.0", "end")
+            editor.tag_remove("match_cur", "1.0", "end")
+        self.pack_forget()
+
+    def _do_find(self):
+        editor = self._editor_getter()
+        if not editor: return
+        editor.tag_remove("match_hl",  "1.0", "end")
+        editor.tag_remove("match_cur", "1.0", "end")
+        query = self.find_var.get()
+        self._matches = []
+        if not query:
+            self.count_lbl.config(text="")
+            return
+        t = self.theme
+        editor.tag_configure("match_hl",  background=t["PEACH"],   foreground="#1e1e2e")
+        editor.tag_configure("match_cur", background=t["PEACH"],   foreground="#1e1e2e",
+                                          font=("Consolas", 12, "bold"))
+        start = "1.0"
+        while True:
+            pos = editor.search(query, start, nocase=True, stopindex="end")
+            if not pos: break
+            end = f"{pos}+{len(query)}c"
+            editor.tag_add("match_hl", pos, end)
+            self._matches.append(pos)
+            start = end
+        if self._matches:
+            self._cur_idx = 0
+            self._highlight_current()
+        else:
+            self._cur_idx = -1
+        self._update_count()
+
+    def _highlight_current(self):
+        editor = self._editor_getter()
+        if not editor or not self._matches: return
+        editor.tag_remove("match_cur", "1.0", "end")
+        pos = self._matches[self._cur_idx]
+        q   = self.find_var.get()
+        editor.tag_add("match_cur", pos, f"{pos}+{len(q)}c")
+        editor.see(pos)
+
+    def _update_count(self):
+        n = len(self._matches)
+        c = self._cur_idx + 1 if n else 0
+        self.count_lbl.config(text=f"{c}/{n}" if n else "0/0")
+
+    def _next_match(self):
+        if not self._matches: return
+        self._cur_idx = (self._cur_idx + 1) % len(self._matches)
+        self._highlight_current()
+        self._update_count()
+
+    def _prev_match(self):
+        if not self._matches: return
+        self._cur_idx = (self._cur_idx - 1) % len(self._matches)
+        self._highlight_current()
+        self._update_count()
+
+    def _replace_one(self):
+        editor = self._editor_getter()
+        if not editor or self._cur_idx < 0: return
+        pos = self._matches[self._cur_idx]
+        q   = self.find_var.get()
+        r   = self.replace_var.get()
+        editor.delete(pos, f"{pos}+{len(q)}c")
+        editor.insert(pos, r)
+        self._do_find()
+
+    def _replace_all(self):
+        editor = self._editor_getter()
+        if not editor: return
+        q = self.find_var.get()
+        r = self.replace_var.get()
+        content = editor.get("1.0", "end-1c")
+        new_content = re.sub(re.escape(q), r, content, flags=re.IGNORECASE)  # FIXED: case-insensitive replace
+        editor.delete("1.0", "end")
+        editor.insert("1.0", new_content)
+        self._do_find()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  VARIABLE INSPECTOR
+# ─────────────────────────────────────────────────────────────────────────────
+class VariableInspector(tk.Frame):
+    def __init__(self, parent, theme, **kw):
+        super().__init__(parent, **kw)
+        self.theme = theme
+        self._build()
+        self._apply_theme(theme)
+
+    def _build(self):
+        t = self.theme
+        hdr = tk.Frame(self, bg=t["BG_MANTLE"])
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="🔬 INSPECTOR", bg=t["BG_MANTLE"],
+                 fg=t["TEXT_SUB"], font=("Segoe UI", 9, "bold")).pack(
+                 side="left", padx=6, pady=4)
+
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Insp.Treeview",
+            background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
+            foreground=t["TEXT_MAIN"], rowheight=20,
+            font=("Consolas", 10))
+        style.configure("Insp.Treeview.Heading",
+            background=t["BG_SURFACE0"], foreground=t["TEXT_SUB"],
+            font=("Segoe UI", 9, "bold"))
+        style.map("Insp.Treeview",
+            background=[("selected", t["BG_SURFACE1"])],
+            foreground=[("selected", t["TEXT_MAIN"])])
+
+        self.tree = ttk.Treeview(self, style="Insp.Treeview",
+            columns=("Name", "Value"), show="headings", selectmode="browse")
+        self.tree.heading("Name",  text="Name")
+        self.tree.heading("Value", text="Value")
+        self.tree.column("Name",  width=90,  minwidth=60)
+        self.tree.column("Value", width=130, minwidth=80)
+        sb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(fill="both", expand=True, side="left")
+        sb.pack(fill="y", side="right")
+
+    def _apply_theme(self, theme):
+        self.theme = theme
+        self.configure(bg=theme["BG_MANTLE"])
+
+    def populate(self, store: dict):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        t = self.theme
+        for name, val in sorted(store.items()):
+            if callable(val) and not isinstance(val, type):  # FIXED: skip plain callables (builtins, GravFunctions)
+                continue
+            label, color = self._format(val)
+            iid = self.tree.insert("", "end", values=(name, label))
+            # tag coloring
+            tag = f"type_{type(val).__name__}"
+            self.tree.item(iid, tags=(tag,))
+            self.tree.tag_configure(tag, foreground=color)
+
+    def _format(self, val):
+        t = self.theme
+        if isinstance(val, bool):
+            return str(val).lower(), t["RED"]
+        if isinstance(val, int) or isinstance(val, float):
+            return str(val), t["MAUVE"]
+        if isinstance(val, str):
+            return f'"{val}"', t["GREEN"]
+        if isinstance(val, list):
+            return f"[{len(val)} items]", t["MAUVE"]
+        if callable(val):
+            name = getattr(val, "__name__", "?")
+            return f"ƒ {name}", t["PEACH"]
+        cls = type(val).__name__
+        return f"<{cls}>", t["PEACH"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FILE EXPLORER
+# ─────────────────────────────────────────────────────────────────────────────
+class FileExplorer(tk.Frame):
+    def __init__(self, parent, theme, open_file_cb, **kw):
+        super().__init__(parent, **kw)
+        self.theme = theme
+        self.open_file_cb = open_file_cb
+        self._cwd = os.path.expanduser("~")
+        self._build()
+        self._apply_theme(theme)
+        self.refresh()
+
+    def _build(self):
+        t = self.theme
+        hdr = tk.Frame(self, bg=t["BG_MANTLE"])
+        hdr.pack(fill="x")
+        tk.Label(hdr, text="EXPLORER", bg=t["BG_MANTLE"],
+                 fg=t["TEXT_SUB"], font=("Segoe UI", 9, "bold")).pack(
+                 side="left", padx=8, pady=5)
+
+        style = ttk.Style()
+        style.configure("Exp.Treeview",
+            background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
+            foreground=t["TEXT_MAIN"], rowheight=22, font=("Segoe UI", 10))
+        style.configure("Exp.Treeview.Heading",
+            background=t["BG_MANTLE"], foreground=t["TEXT_SUB"],
+            font=("Segoe UI", 9))
+        style.map("Exp.Treeview",
+            background=[("selected", t["BG_SURFACE0"])],
+            foreground=[("selected", t["BLUE"])])
+
+        self.tree = ttk.Treeview(self, style="Exp.Treeview", show="tree",
+                                 selectmode="browse")
+        sb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(fill="both", expand=True, side="left")
+        sb.pack(fill="y", side="right")
+
+        self.tree.bind("<Double-1>",   self._on_double)
+        self.tree.bind("<Button-3>",   self._on_right)
+
+        self.ctx_menu = tk.Menu(self, tearoff=0,
+            bg=t["BG_SURFACE0"], fg=t["TEXT_MAIN"],
+            activebackground=t["BG_SURFACE1"],
+            activeforeground=t["TEXT_MAIN"], bd=0)
+        self.ctx_menu.add_command(label="New File",  command=self._new_file)
+        self.ctx_menu.add_command(label="Rename",    command=self._rename)
+        self.ctx_menu.add_command(label="Delete",    command=self._delete)
+
+    def _apply_theme(self, theme):
+        self.theme = theme
+        self.configure(bg=theme["BG_MANTLE"])
+
+    def set_cwd(self, path):
+        self._cwd = path
+        self.refresh()
+
+    def refresh(self):
+        for item in self.tree.get_children():
+            self.tree.delete(item)
         try:
-            pos = self.editor.index(tk.INSERT)
-            line, col = pos.split(".")
-            total = int(self.editor.index("end-1c").split(".")[0])
-            self.status_bar.config(
-                text=f"Line {line}, Col {int(col) + 1}  |  {total} lines  |  {state}"
-            )
+            entries = sorted(os.listdir(self._cwd))
         except Exception:
-            self.status_bar.config(text=state)
+            return
+        folder = self.tree.insert("", "end", text=f"📁 {os.path.basename(self._cwd)}",
+                                  open=True, iid="__root__")
+        for name in entries:
+            full = os.path.join(self._cwd, name)
+            icon = "📄 " if os.path.isfile(full) else "📁 "
+            self.tree.insert(folder, "end", text=icon + name, values=(full,))
 
-    # ── syntax highlighting tags ─────────────────────────────────────
+    def _on_double(self, event):
+        sel = self.tree.selection()
+        if not sel: return
+        vals = self.tree.item(sel[0], "values")
+        if vals:
+            path = vals[0]
+            if os.path.isfile(path):
+                self.open_file_cb(path)
+
+    def _on_right(self, event):
+        iid = self.tree.identify_row(event.y)
+        if iid:
+            self.tree.selection_set(iid)
+        self.ctx_menu.post(event.x_root, event.y_root)
+
+    def _new_file(self):
+        name = _simple_dialog(self.winfo_toplevel(), "New File", "Filename:")
+        if name:
+            full = os.path.join(self._cwd, name)
+            open(full, "a", encoding="utf-8").close()
+            self.refresh()
+
+    def _rename(self):
+        sel = self.tree.selection()
+        if not sel: return
+        vals = self.tree.item(sel[0], "values")
+        if not vals: return
+        old = vals[0]
+        new_name = _simple_dialog(self.winfo_toplevel(), "Rename", "New name:",
+                                  initial=os.path.basename(old))
+        if new_name:
+            new_path = os.path.join(os.path.dirname(old), new_name)
+            os.rename(old, new_path)
+            self.refresh()
+
+    def _delete(self):
+        sel = self.tree.selection()
+        if not sel: return
+        vals = self.tree.item(sel[0], "values")
+        if not vals: return
+        path = vals[0]
+        if messagebox.askyesno("Delete", f"Delete {os.path.basename(path)}?"):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+            self.refresh()
+
+
+def _simple_dialog(parent, title, prompt, initial=""):
+    dlg = tk.Toplevel(parent)
+    dlg.title(title)
+    dlg.configure(bg="#181825")
+    dlg.resizable(False, False)
+    result = [None]
+    tk.Label(dlg, text=prompt, bg="#181825", fg="#cdd6f4",
+             font=("Segoe UI", 10)).pack(padx=16, pady=(12, 4))
+    var = tk.StringVar(value=initial)
+    ent = tk.Entry(dlg, textvariable=var, bg="#1e1e2e", fg="#cdd6f4",
+                   font=("Consolas", 11), relief="flat",
+                   insertbackground="#f5e0dc", width=28)
+    ent.pack(padx=16, pady=4)
+    ent.select_range(0, "end")
+    ent.focus_set()
+    def ok(*_):
+        result[0] = var.get()
+        dlg.destroy()
+    def cancel(*_):
+        dlg.destroy()
+    row = tk.Frame(dlg, bg="#181825")
+    row.pack(pady=10)
+    tk.Button(row, text="OK",     command=ok,     bg="#89b4fa", fg="#1e1e2e",
+              relief="flat", font=("Segoe UI", 10, "bold"), padx=14).pack(side="left", padx=4)
+    tk.Button(row, text="Cancel", command=cancel, bg="#313244", fg="#cdd6f4",
+              relief="flat", font=("Segoe UI", 10), padx=10).pack(side="left", padx=4)
+    ent.bind("<Return>", ok)
+    ent.bind("<Escape>", cancel)
+    dlg.transient(parent)
+    dlg.grab_set()
+    parent.wait_window(dlg)
+    return result[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  EDITOR TAB
+# ─────────────────────────────────────────────────────────────────────────────
+class EditorTab:
+    def __init__(self, parent_frame, theme, on_change_cb, on_cursor_cb):
+        self.theme = theme
+        self.filepath: str  = ""
+        self.modified: bool = False
+        self._on_change = on_change_cb
+        self._on_cursor = on_cursor_cb
+        self._autocomplete: AutoCompletePopup = None
+        self._frame = tk.Frame(parent_frame, bg=theme["BG_BASE"])
+        self._build()
+
+    def _build(self):
+        t = self.theme
+        self.container = tk.Frame(self._frame, bg=t["BG_BASE"])
+        self.container.pack(fill="both", expand=True)
+
+        # line numbers
+        self.line_frame = tk.Frame(self.container, bg=t["BG_BASE"], width=44)
+        self.line_frame.pack(side="left", fill="y")
+        self.line_frame.pack_propagate(False)
+        self.ln_canvas = tk.Canvas(self.line_frame, bg=t["BG_BASE"],
+                                   width=44, highlightthickness=0)
+        self.ln_canvas.pack(fill="both", expand=True)
+
+        # editor
+        self.editor = tk.Text(
+            self.container,
+            bg=t["BG_BASE"], fg=t["TEXT_MAIN"],
+            insertbackground=t["FG_CURSOR"],
+            selectbackground=t["BG_SURFACE1"],
+            selectforeground=t["TEXT_MAIN"],
+            font=("Consolas", 12),
+            relief="flat", bd=0, wrap="none",
+            undo=True,
+            tabs=("40p",),
+        )
+        self.vsb = tk.Scrollbar(self.container, orient="vertical",
+                                command=self._on_yscroll)
+        self.hsb = tk.Scrollbar(self._frame, orient="horizontal",
+                                command=self.editor.xview)
+        self.editor.configure(yscrollcommand=self._on_yscroll_set,
+                              xscrollcommand=self.hsb.set)
+        self.hsb.pack(side="bottom", fill="x")
+        self.vsb.pack(side="right", fill="y")
+        self.editor.pack(fill="both", expand=True, side="left")
+
+        self._autocomplete = AutoCompletePopup(self.editor)
+        self.editor.bind("<<AutoComplete>>", self._accept_autocomplete)
+
+        self._setup_tags()
+        self._setup_bindings()
+        self._update_line_numbers()
+
+    def _on_yscroll(self, *args):
+        self.editor.yview(*args)
+        self._update_line_numbers()
+
+    def _on_yscroll_set(self, lo, hi):
+        self.vsb.set(lo, hi)
+        self._update_line_numbers()
 
     def _setup_tags(self):
-        self.editor.tag_configure("keyword",  foreground=self.ACCENT)
-        self.editor.tag_configure("builtin",  foreground=self.ACCENT6)
-        self.editor.tag_configure("string",   foreground=self.ACCENT4)
-        self.editor.tag_configure("number",   foreground=self.ACCENT5)
-        self.editor.tag_configure("comment",  foreground=self.FG_LINENO)
-        self.editor.tag_configure("boolean",  foreground=self.ACCENT3)
-        self.editor.tag_configure("augop",    foreground=self.ACCENT5)
+        t = self.theme
+        self.editor.tag_configure("keyword",   foreground=t["BLUE"])
+        self.editor.tag_configure("builtin",   foreground=t["TEAL"])
+        self.editor.tag_configure("string",    foreground=t["GREEN"])
+        self.editor.tag_configure("number",    foreground=t["MAUVE"])
+        self.editor.tag_configure("comment",   foreground=t["TEXT_SUB"])
+        self.editor.tag_configure("boolean",   foreground=t["RED"])
+        self.editor.tag_configure("self_kw",   foreground=t["LAVENDER"])
+        self.editor.tag_configure("class_nm",  foreground=t["PEACH"])
+        self.editor.tag_configure("augop",     foreground=t["MAUVE"])
+        self.editor.tag_configure("active_ln", background=t["BG_SURFACE0"])
+        self.editor.tag_configure("match_hl",  background=t["PEACH"], foreground="#1e1e2e")
+        self.editor.tag_configure("match_cur", background=t["PEACH"], foreground="#1e1e2e",
+                                  font=("Consolas", 12, "bold"))
 
-        self.output.tag_configure("error", foreground=self.ACCENT3)
-        self.output.tag_configure("info",  foreground=self.FG_LINENO)
+    def _setup_bindings(self):
+        ed = self.editor
+        ed.bind("<KeyRelease>",     self._on_key_release)
+        ed.bind("<ButtonRelease>",  self._on_cursor_move)
+        ed.bind("<Return>",         self._on_return)
+        ed.bind("<Tab>",            self._on_tab)
+        ed.bind("(", lambda e: self._auto_close("(", ")"))
+        ed.bind("[", lambda e: self._auto_close("[", "]"))
+        ed.bind("{", lambda e: self._auto_close("{", "}"))
+        ed.bind('"', lambda e: self._auto_close('"', '"'))
+        ed.bind("<Control-slash>",  self._toggle_comment)
+        ed.bind("<Control-d>",      self._duplicate_line)
+        ed.bind("<Up>",    self._ac_up)
+        ed.bind("<Down>",  self._ac_down)
+        ed.bind("<Escape>", lambda e: self._autocomplete.hide())
 
-    # ── events ───────────────────────────────────────────────────────
-
-    def _bind_events(self):
-        self.editor.bind("<KeyRelease>",    lambda _e: self._on_change())
-        self.editor.bind("<ButtonRelease>", lambda _e: self._update_status())
-        self.editor.bind("<Return>",        lambda _e: self.root.after(1, self._on_change))
-        self.editor.bind("<BackSpace>",     lambda _e: self.root.after(1, self._on_change))
-        self.root.bind("<Control-Return>",  lambda _e: self._on_run())
-        self.root.bind("<F5>",              lambda _e: self._on_run())
-        self.root.bind("<Control-l>",       lambda _e: self._on_clear())
-
-    def _on_change(self):
-        self._update_line_numbers()
+    def _on_key_release(self, event):
+        if event.keysym in ("Up","Down","Left","Right","Escape"):
+            self._on_cursor_move(event)
+            return
+        if event.keysym not in ("Return","Tab","space","BackSpace"):
+            self._maybe_autocomplete()
+        self._on_change()
+        self.modified = True
         self._highlight()
-        self._update_status()
+        self._update_line_numbers()
+        self._on_cursor_move(event)
 
-    # ── scrolling sync ───────────────────────────────────────────────
+    def _on_cursor_move(self, event=None):
+        pos = self.editor.index("insert")
+        row, col = pos.split(".")
+        self._on_cursor(int(row), int(col) + 1)
 
-    def _sync_scroll(self, *args):
-        self.line_numbers.yview_moveto(args[0])
+    def _on_return(self, event):
+        self._autocomplete.hide()
+        idx = self.editor.index("insert")
+        line_start = f"{idx.split('.')[0]}.0"
+        line_text  = self.editor.get(line_start, idx)
+        indent = len(line_text) - len(line_text.lstrip())
+        stripped = line_text.strip()
+        extra = 4 if stripped.endswith("{") else 0
+        self.editor.insert(idx, "\n" + " " * (indent + extra))
+        return "break"
 
-    def _on_editor_scroll(self, *args):
-        self.editor.yview(*args)
-        self.line_numbers.yview(*args)
+    def _on_tab(self, event):
+        if self._autocomplete.visible():
+            self._autocomplete._accept()
+            return "break"
+        self.editor.insert("insert", "    ")
+        return "break"
 
-    # ── line numbers ─────────────────────────────────────────────────
+    def _ac_up(self, event):
+        if self._autocomplete.visible():
+            self._autocomplete.navigate(-1)
+            return "break"
 
-    def _update_line_numbers(self):
-        self.line_numbers.config(state=tk.NORMAL)
-        self.line_numbers.delete("1.0", tk.END)
-        line_count = int(self.editor.index("end-1c").split(".")[0])
-        numbers = "\n".join(str(i) for i in range(1, line_count + 1))
-        self.line_numbers.insert("1.0", numbers)
-        self.line_numbers.config(state=tk.DISABLED)
+    def _ac_down(self, event):
+        if self._autocomplete.visible():
+            self._autocomplete.navigate(1)
+            return "break"
 
-    # ── syntax highlighting ──────────────────────────────────────────
+    def _maybe_autocomplete(self):
+        idx = self.editor.index("insert")
+        row, col = idx.split(".")
+        line = self.editor.get(f"{row}.0", idx)
+        m = re.search(r'[a-zA-Z_]\w*$', line)
+        if m and len(m.group()) >= 2:
+            prefix = m.group()
+            x = self.editor.winfo_rootx() + int(col) * 7
+            y = self.editor.winfo_rooty() + int(row) * 18 + 24
+            self._autocomplete.show(x, y, prefix)
+        else:
+            self._autocomplete.hide()
+
+    def _accept_autocomplete(self, event):
+        word = event.data if hasattr(event, "data") else ""
+        if not word: return
+        idx  = self.editor.index("insert")
+        row, col = idx.split(".")
+        line = self.editor.get(f"{row}.0", idx)
+        m    = re.search(r'[a-zA-Z_]\w*$', line)
+        if m:
+            start = f"{row}.{int(col) - len(m.group())}"
+            self.editor.delete(start, idx)
+        self.editor.insert("insert", word)
+
+    def _auto_close(self, open_ch, close_ch):
+        self.editor.insert("insert", open_ch + close_ch)
+        pos = self.editor.index("insert")
+        row, col = pos.split(".")
+        self.editor.mark_set("insert", f"{row}.{int(col)-1}")
+        return "break"
+
+    def _toggle_comment(self, event=None):
+        idx  = self.editor.index("insert")
+        row  = idx.split(".")[0]
+        line = self.editor.get(f"{row}.0", f"{row}.end")
+        if line.lstrip().startswith("#"):
+            new = line.replace("# ", "", 1).replace("#", "", 1)
+        else:
+            new = "# " + line
+        self.editor.delete(f"{row}.0", f"{row}.end")
+        self.editor.insert(f"{row}.0", new)
+        return "break"
+
+    def _duplicate_line(self, event=None):
+        idx  = self.editor.index("insert")
+        row  = idx.split(".")[0]
+        line = self.editor.get(f"{row}.0", f"{row}.end")
+        self.editor.insert(f"{row}.end", "\n" + line)
+        return "break"
 
     def _highlight(self):
-        code = self.editor.get("1.0", tk.END)
-        for tag in ("keyword", "builtin", "string", "number", "comment", "boolean", "augop"):
-            self.editor.tag_remove(tag, "1.0", tk.END)
+        ed = self.editor
+        for tag in ("keyword","builtin","string","number","comment",
+                    "boolean","self_kw","class_nm","augop"):
+            ed.tag_remove(tag, "1.0", "end")
+        content = ed.get("1.0", "end-1c")
+        patterns = [
+            ("comment",  COMMENTS),
+            ("string",   STRINGS),
+            ("boolean",  BOOLEANS),
+            ("self_kw",  SELF_KW),
+            ("keyword",  KEYWORDS),
+            ("builtin",  BUILTINS),
+            ("number",   NUMBERS),
+            ("augop",    AUG_OPS),
+            ("class_nm", CLASS_NAME),
+        ]
+        for tag, pat in patterns:
+            for m in re.finditer(pat, content):
+                s = m.start(); e = m.end()
+                l1, c1 = _offset_to_pos(content, s)
+                l2, c2 = _offset_to_pos(content, e)
+                ed.tag_add(tag, f"{l1}.{c1}", f"{l2}.{c2}")
+        # active line
+        ed.tag_remove("active_ln", "1.0", "end")
+        cur_row = ed.index("insert").split(".")[0]
+        ed.tag_add("active_ln", f"{cur_row}.0", f"{cur_row}.end+1c")
 
-        # Comments
-        for m in re.finditer(r"#[^\n]*", code):
-            self._tag_match(m, "comment")
-        # Strings
-        for m in re.finditer(r'"(?:[^"\\]|\\.)*"', code):
-            self._tag_match(m, "string")
-        # Numbers
-        for m in re.finditer(r"\b\d+(\.\d+)?\b", code):
-            self._tag_match(m, "number")
-        # Keywords
-        for word in KEYWORDS:
-            for m in re.finditer(rf"\b{word}\b", code):
-                self._tag_match(m, "keyword")
-        # Booleans (overrides keyword)
-        for m in re.finditer(r"\b(true|false)\b", code):
-            self._tag_match(m, "boolean")
-        # Builtins
-        for word in BUILTINS:
-            for m in re.finditer(rf"\b{word}\b", code):
-                self._tag_match(m, "builtin")
-        # Augmented assignment operators
-        for m in re.finditer(r"(\+=|-=|\*=|/=)", code):
-            self._tag_match(m, "augop")
+    def _update_line_numbers(self):
+        self.ln_canvas.delete("all")
+        t = self.theme
+        i = self.editor.index("@0,0")
+        cur_row = self.editor.index("insert").split(".")[0]
+        y = 4
+        while True:
+            dline = self.editor.dlineinfo(i)
+            if dline is None: break
+            _, dy, _, dh, _ = dline
+            linenum = i.split(".")[0]
+            color = t["TEXT_MAIN"] if linenum == cur_row else t["TEXT_SUB"]
+            self.ln_canvas.create_text(38, dy + dh // 2,
+                text=linenum, anchor="e",
+                fill=color, font=("Consolas", 11))
+            next_i = self.editor.index(f"{i}+1line")
+            if next_i == i: break
+            i = next_i
 
-    def _tag_match(self, match: re.Match, tag: str):
-        start = f"1.0+{match.start()}c"
-        end   = f"1.0+{match.end()}c"
-        self.editor.tag_add(tag, start, end)
+    def apply_theme(self, theme):
+        self.theme = theme
+        t = theme
+        self.editor.configure(
+            bg=t["BG_BASE"], fg=t["TEXT_MAIN"],
+            insertbackground=t["FG_CURSOR"],
+            selectbackground=t["BG_SURFACE1"],
+        )
+        self.ln_canvas.configure(bg=t["BG_BASE"])
+        self.line_frame.configure(bg=t["BG_BASE"])
+        self.container.configure(bg=t["BG_BASE"])
+        self._frame.configure(bg=t["BG_BASE"])
+        self._setup_tags()
+        self._highlight()
+        self._update_line_numbers()
 
-    # ── button handlers ──────────────────────────────────────────────
+    @property
+    def frame(self):
+        return self._frame
 
-    def _on_run(self):
-        code = self.editor.get("1.0", tk.END).strip()
-        if not code:
+    def get_content(self):
+        return self.editor.get("1.0", "end-1c")
+
+    def set_content(self, text):
+        self.editor.delete("1.0", "end")
+        self.editor.insert("1.0", text)
+        self._highlight()
+        self._update_line_numbers()
+        self.modified = False
+
+    def name(self):
+        return os.path.basename(self.filepath) if self.filepath else "untitled.grav"
+
+
+def _offset_to_pos(text, offset):
+    before = text[:offset]
+    lines  = before.split("\n")
+    return len(lines), len(lines[-1])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MAIN IDE CLASS
+# ─────────────────────────────────────────────────────────────────────────────
+class GravLangIDE:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("GravLang IDE")
+        self.root.geometry("1280x800")
+        self.root.minsize(900, 600)
+
+        # load config
+        self._config = self._load_config()
+        theme_name   = self._config.get("theme", "Catppuccin Mocha")
+        self.theme   = THEMES.get(theme_name, THEMES["Catppuccin Mocha"])
+        self.theme_name = theme_name
+
+        # state
+        self._tabs:       list[EditorTab] = []
+        self._tab_frames: list[tk.Frame]  = []
+        self._active_idx: int = -1
+        self._sidebar_visible = True
+        self._inspector_visible = True
+        self._last_run_time: float = 0.0
+        self._run_status   = ""
+        self._cancel_flag  = False        # FIXED: cancel flag for Stop button
+        self._run_thread   = None         # FIXED: track background run thread
+
+        self.root.configure(bg=self.theme["BG_BASE"])
+        self._build_ui()
+        self._bind_global()
+        self.new_tab()
+
+    # ── UI BUILD ──────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        self._build_titlebar()
+        self._build_tabbar()
+        self._build_toolbar()
+        self._build_findbar()
+        self._build_body()
+        self._build_statusbar()
+
+    def _build_titlebar(self):
+        t  = self.theme
+        tb = tk.Frame(self.root, bg=t["BG_MANTLE"], height=30)
+        tb.pack(fill="x", side="top")
+        tb.pack_propagate(False)
+        self._titlebar = tb
+
+        # ── Window drag (click anywhere on bar except buttons) ───────────────
+        self._drag_x = 0
+        self._drag_y = 0
+        self._is_maximized = False
+
+        def start_drag(e):
+            self._drag_x = e.x_root - self.root.winfo_x()
+            self._drag_y = e.y_root - self.root.winfo_y()
+
+        def do_drag(e):
+            if self._is_maximized:
+                return
+            x = e.x_root - self._drag_x
+            y = e.y_root - self._drag_y
+            self.root.geometry(f"+{x}+{y}")
+
+        def on_double_click(e):
+            self._toggle_fullscreen()
+
+        tb.bind("<Button-1>",    start_drag)
+        tb.bind("<B1-Motion>",   do_drag)
+        tb.bind("<Double-1>",    on_double_click)
+
+        # ── LEFT: app icon ───────────────────────────────────────────────────
+        icon_cv = tk.Canvas(tb, width=20, height=20,
+                            bg=t["BG_MANTLE"], highlightthickness=0)
+        icon_cv.pack(side="left", padx=(10, 4), pady=5)
+        # Draw a simple "G" chevron logo like VS Code's icon
+        icon_cv.create_polygon(10,3, 17,7, 17,13, 10,17, 10,13, 14,10, 14,10, 10,7,
+                               fill=t["BLUE"], outline="")
+        icon_cv.bind("<Button-1>", start_drag)
+        icon_cv.bind("<B1-Motion>", do_drag)
+
+        # ── CENTER: title text (draggable) ───────────────────────────────────
+        self.title_lbl = tk.Label(tb, text="GravLang IDE — untitled.grav",
+            bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
+            font=("Segoe UI", 11))
+        self.title_lbl.place(relx=0.5, rely=0.5, anchor="center")
+        self.title_lbl.bind("<Button-1>",  start_drag)
+        self.title_lbl.bind("<B1-Motion>", do_drag)
+        self.title_lbl.bind("<Double-1>",  on_double_click)
+
+        # ── RIGHT: Windows-style window controls ─────────────────────────────
+        btn_frame = tk.Frame(tb, bg=t["BG_MANTLE"])
+        btn_frame.pack(side="right")
+
+        # Each control: (symbol, hover_bg, command)
+        controls = [
+            ("─",  t["BG_SURFACE0"], self._minimize_window),
+            ("□",  t["BG_SURFACE0"], self._toggle_fullscreen),
+            ("✕",  "#c42b1c",        self.root.destroy),
+        ]
+        self._win_btns = []
+        for symbol, hover_bg, cmd in controls:
+            normal_bg = t["BG_MANTLE"]
+            btn = tk.Label(
+                btn_frame, text=symbol,
+                bg=normal_bg, fg=t["TEXT_OVERLAY"],
+                font=("Segoe UI", 11),
+                width=4, pady=4, cursor="hand2",
+            )
+            btn.pack(side="left")
+            btn.bind("<Button-1>", lambda e, c=cmd: c())
+            btn.bind("<Enter>",    lambda e, w=btn, h=hover_bg: w.configure(bg=h, fg="#ffffff"))
+            btn.bind("<Leave>",    lambda e, w=btn, nb=normal_bg, t=t: w.configure(bg=nb, fg=t["TEXT_OVERLAY"]))
+            self._win_btns.append((btn, normal_bg, hover_bg))
+
+    def _build_tabbar(self):
+        t   = self.theme
+        bar = tk.Frame(self.root, bg=t["BG_MANTLE"], height=36,
+                       bd=0, relief="flat")
+        bar.pack(fill="x", side="top")
+        bar.pack_propagate(False)
+
+        # inner scrollable tab area
+        self._tab_scroll_frame = tk.Frame(bar, bg=t["BG_MANTLE"])
+        self._tab_scroll_frame.pack(side="left", fill="y")
+
+        plus = tk.Label(bar, text=" + ", bg=t["BG_MANTLE"], fg=t["TEXT_OVERLAY"],
+                        font=("Segoe UI", 14, "bold"), cursor="hand2")
+        plus.pack(side="left", padx=4)
+        plus.bind("<Button-1>", lambda e: self.new_tab())
+
+        self._tabbar = bar
+        self._tab_labels: list[tk.Frame] = []
+
+    def _build_toolbar(self):
+        t   = self.theme
+        bar = tk.Frame(self.root, bg=t["BG_MANTLE"], height=36)
+        bar.pack(fill="x", side="top")
+        bar.pack_propagate(False)
+        self._toolbar = bar
+
+        def btn(text, cmd, accent=False, padx=10):
+            bg = t["BLUE"] if accent else t["BG_MANTLE"]
+            fg = t["BG_CRUST"] if accent else t["TEXT_MAIN"]
+            b  = tk.Button(bar, text=text, command=cmd,
+                bg=bg, fg=fg, relief="flat", font=("Segoe UI", 10, "bold"),
+                padx=padx, pady=4, cursor="hand2",
+                activebackground=t["BG_SURFACE0"] if not accent else t["TEAL"],
+                activeforeground=fg, bd=0, highlightthickness=0)
+            b.pack(side="left", padx=1, pady=3)
+            b.bind("<Enter>", lambda e, w=b: w.configure(
+                bg=t["BG_SURFACE0"] if not accent else t["TEAL"]))
+            b.bind("<Leave>", lambda e, w=b: w.configure(
+                bg=bg))
+            return b
+
+        def sep():
+            tk.Frame(bar, bg=t["BG_SURFACE0"], width=1, height=18).pack(
+                side="left", padx=4, pady=8)
+
+        self._run_button = btn("▶  Run", self.run_code, accent=True)
+        sep()
+        btn("📂 Open",  self.open_file)
+        btn("💾 Save",  self.save_file)
+        sep()
+        # Examples dropdown
+        ex_btn = tk.Button(bar, text="📚 Examples ▾", command=self._show_examples,
+            bg=t["BG_MANTLE"], fg=t["TEXT_MAIN"], relief="flat",
+            font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
+            activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
+        ex_btn.pack(side="left", padx=1, pady=3)
+        ex_btn.bind("<Enter>", lambda e: ex_btn.configure(bg=t["BG_SURFACE0"]))
+        ex_btn.bind("<Leave>", lambda e: ex_btn.configure(bg=t["BG_MANTLE"]))
+
+        btn("🔍 Find", self._toggle_find)
+        sep()
+        # Theme dropdown (right)
+        th_btn = tk.Button(bar, text="🎨 Theme ▾", command=self._show_themes,
+            bg=t["BG_MANTLE"], fg=t["TEXT_MAIN"], relief="flat",
+            font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
+            activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
+        th_btn.pack(side="right", padx=1, pady=3)
+        th_btn.bind("<Enter>", lambda e: th_btn.configure(bg=t["BG_SURFACE0"]))
+        th_btn.bind("<Leave>", lambda e: th_btn.configure(bg=t["BG_MANTLE"]))
+
+        hlp_btn = tk.Button(bar, text="? Shortcuts", command=self._show_shortcuts,
+            bg=t["BG_MANTLE"], fg=t["TEXT_MAIN"], relief="flat",
+            font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
+            activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
+        hlp_btn.pack(side="right", padx=1, pady=3)
+        hlp_btn.bind("<Enter>", lambda e: hlp_btn.configure(bg=t["BG_SURFACE0"]))
+        hlp_btn.bind("<Leave>", lambda e: hlp_btn.configure(bg=t["BG_MANTLE"]))
+
+        # self._run_button is the primary reference; _run_btn kept for compat
+        self._run_btn = self._run_button
+
+    def _build_findbar(self):
+        t = self.theme
+        self._findbar = FindReplaceBar(
+            self.root,
+            editor_getter=self._active_editor,
+            theme=t, bg=t["BG_MANTLE"])
+        # not packed yet — shown on demand
+
+    def _build_body(self):
+        t = self.theme
+        # Outer frame fills all remaining space between toolbars and statusbar
+        self._outer = tk.Frame(self.root, bg=t["BG_BASE"])
+        self._outer.pack(fill="both", expand=True)
+
+        # ── ACTIVITY BAR (leftmost vertical strip) ───────────────────────────
+        self._activity_bar = tk.Frame(self._outer, bg=t["BG_MANTLE"], width=44)
+        self._activity_bar.pack(side="left", fill="y")
+        self._activity_bar.pack_propagate(False)
+        self._build_activity_bar()
+
+        # ── RIGHT SIDE: vertical split (editor on top, output on bottom) ─────
+        # All side="left" children must be added BEFORE any side="top/bottom"
+        # children, or pack ignores them.  So we put the vertical frame here.
+        self._right = tk.Frame(self._outer, bg=t["BG_BASE"])
+        self._right.pack(side="left", fill="both", expand=True)
+
+        # ── BOTTOM PANE (inside _right, packed first so it reserves space) ───
+        self._build_bottom_pane()
+
+        # ── HORIZONTAL ROW: sidebar + editor (above the bottom pane) ─────────
+        self._body = tk.Frame(self._right, bg=t["BG_BASE"])
+        self._body.pack(side="top", fill="both", expand=True)
+
+        # ── SIDEBAR (file explorer) ──────────────────────────────────────────
+        self._sidebar = tk.Frame(self._body, bg=t["BG_MANTLE"], width=180)
+        self._sidebar.pack(side="left", fill="y")
+        self._sidebar.pack_propagate(False)
+        self._file_explorer = FileExplorer(
+            self._sidebar, t, self.open_file_path)
+        self._file_explorer.pack(fill="both", expand=True)
+
+        # ── EDITOR AREA ──────────────────────────────────────────────────────
+        self._editor_pane = tk.Frame(self._body, bg=t["BG_BASE"])
+        self._editor_pane.pack(side="left", fill="both", expand=True)
+
+        # container for stacked tab frames
+        self._editor_stack = tk.Frame(self._editor_pane, bg=t["BG_BASE"])
+        self._editor_stack.pack(fill="both", expand=True, side="left")
+
+    def _build_activity_bar(self):
+        t   = self.theme
+        bar = self._activity_bar
+        icons = [("⬜", self._toggle_sidebar, True),
+                 ("🔍", self._toggle_find, False)]
+        self._act_btns = []
+        for text, cmd, active in icons:
+            btn = tk.Button(bar, text=text, command=cmd,
+                bg=t["BG_MANTLE"], fg=t["BLUE"] if active else t["TEXT_SUB"],
+                relief="flat", font=("Segoe UI", 14), padx=0, pady=6,
+                cursor="hand2", width=3, bd=0, highlightthickness=0,
+                activebackground=t["BG_SURFACE0"])
+            btn.pack(fill="x", pady=2)
+            self._act_btns.append(btn)
+
+        # info at bottom
+        info = tk.Button(bar, text="ⓘ", command=self._show_shortcuts,
+            bg=t["BG_MANTLE"], fg=t["TEXT_SUB"], relief="flat",
+            font=("Segoe UI", 13), cursor="hand2", width=3, bd=0,
+            highlightthickness=0, activebackground=t["BG_SURFACE0"])
+        info.place(relx=0.5, rely=1.0, anchor="s", y=-6)
+
+    def _build_bottom_pane(self):
+        t = self.theme
+
+        # ── Drag-sash resize handle ──────────────────────────────────────────
+        self._sash = tk.Frame(self._right, bg=t["BG_SURFACE1"], height=4, cursor="sb_v_double_arrow")
+        self._sash.pack(side="bottom", fill="x")
+        self._sash_dragging = False
+        self._sash_start_y  = 0
+        self._sash_start_h  = 220
+
+        def _sash_press(e):
+            self._sash_dragging = True
+            self._sash_start_y  = e.y_root
+            self._sash_start_h  = self._bottom.winfo_height()
+
+        def _sash_drag(e):
+            if not self._sash_dragging:
+                return
+            delta = self._sash_start_y - e.y_root   # dragging up = bigger panel
+            new_h = max(80, min(self._sash_start_h + delta, 600))
+            self._bottom.configure(height=new_h)
+
+        def _sash_release(e):
+            self._sash_dragging = False
+
+        self._sash.bind("<ButtonPress-1>",   _sash_press)
+        self._sash.bind("<B1-Motion>",        _sash_drag)
+        self._sash.bind("<ButtonRelease-1>",  _sash_release)
+        # Highlight sash on hover
+        self._sash.bind("<Enter>", lambda e: self._sash.configure(bg=t["BLUE"]))
+        self._sash.bind("<Leave>", lambda e: self._sash.configure(bg=t["BG_SURFACE1"]))
+
+        # ── Main bottom container ────────────────────────────────────────────
+        self._bottom = tk.Frame(self._right, bg=t["BG_CRUST"], height=220)
+        self._bottom.pack(side="bottom", fill="x")
+        self._bottom.pack_propagate(False)
+
+        # ── Output area (left) ───────────────────────────────────────────────
+        self._out_frame = tk.Frame(self._bottom, bg=t["BG_CRUST"])
+        self._out_frame.pack(side="left", fill="both", expand=True)
+
+        hdr = tk.Frame(self._out_frame, bg=t["BG_MANTLE"], height=28)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+
+        tk.Label(hdr, text="OUTPUT", bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=8, pady=4)
+
+        # ── Clear on Run toggle ──────────────────────────────────────────────
+        self._clear_on_run = tk.BooleanVar(value=False)
+
+        def _toggle_clear_on_run():
+            state = self._clear_on_run.get()
+            clr_lbl.configure(
+                fg=t["BLUE"] if state else t["TEXT_SUB"],
+                text="⟳ Clear on Run ✓" if state else "⟳ Clear on Run",
+            )
+
+        clr_lbl = tk.Label(
+            hdr, text="⟳ Clear on Run",
+            bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
+            font=("Segoe UI", 9), cursor="hand2", padx=6,
+        )
+        clr_lbl.pack(side="left", pady=4)
+        clr_lbl.bind("<Button-1>", lambda e: (
+            self._clear_on_run.set(not self._clear_on_run.get()),
+            _toggle_clear_on_run(),
+        ))
+        clr_lbl.bind("<Enter>", lambda e: clr_lbl.configure(fg=t["BLUE"]))
+        clr_lbl.bind("<Leave>", lambda e: clr_lbl.configure(
+            fg=t["BLUE"] if self._clear_on_run.get() else t["TEXT_SUB"]))
+        self._clr_lbl = clr_lbl   # keep ref for theme updates
+
+        tk.Button(hdr, text="📋 Copy",  command=self._copy_output,
+            bg=t["BG_MANTLE"], fg=t["TEXT_SUB"], relief="flat",
+            font=("Segoe UI", 9), cursor="hand2", bd=0,
+            highlightthickness=0).pack(side="right", padx=4, pady=2)
+        tk.Button(hdr, text="✕ Clear", command=self._clear_output,
+            bg=t["BG_MANTLE"], fg=t["TEXT_SUB"], relief="flat",
+            font=("Segoe UI", 9), cursor="hand2", bd=0,
+            highlightthickness=0).pack(side="right", pady=2)
+
+        self._output = tk.Text(self._out_frame, bg=t["BG_CRUST"],
+            fg=t["GREEN"], font=("Consolas", 11), relief="flat",
+            state="disabled", wrap="word", bd=0)
+        self._output.pack(fill="both", expand=True, padx=4, pady=4)
+        self._output.tag_configure("error",  foreground=t["RED"])
+        self._output.tag_configure("timing", foreground=t["BLUE"])
+        self._output.tag_configure("sep",    foreground=t["TEXT_SUB"])
+
+        # ── Inspector (right) ────────────────────────────────────────────────
+        self._insp_frame = tk.Frame(self._bottom, bg=t["BG_MANTLE"], width=260)
+        self._insp_frame.pack(side="right", fill="y")
+        self._insp_frame.pack_propagate(False)
+        self._inspector = VariableInspector(self._insp_frame, t)
+        self._inspector.pack(fill="both", expand=True)
+
+    def _build_statusbar(self):
+        t  = self.theme
+        sb = tk.Frame(self.root, bg=t["STATUS_BG"], height=22)
+        sb.pack(fill="x", side="bottom")
+        sb.pack_propagate(False)
+
+        self._status_lang = tk.Label(sb, text="⬤ GravLang",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"],
+            font=("Segoe UI", 10, "bold"))
+        self._status_lang.pack(side="left", padx=8)
+
+        self._status_file = tk.Label(sb, text="untitled.grav",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+        self._status_file.pack(side="left", padx=4)
+
+        self._status_cursor = tk.Label(sb, text="Ln 1, Col 1",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+        self._status_cursor.pack(side="right", padx=8)
+
+        self._status_lines = tk.Label(sb, text="1 line",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+        self._status_lines.pack(side="right", padx=8)
+
+        self._status_run = tk.Label(sb, text="UTF-8",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+        self._status_run.pack(side="right", padx=8)
+
+        self._statusbar = sb
+
+    # ── TAB MANAGEMENT ────────────────────────────────────────────────────────
+
+    def new_tab(self, filepath="", content=""):
+        t   = self.theme
+        tab = EditorTab(self._editor_stack, t,
+                        on_change_cb=self._on_editor_change,
+                        on_cursor_cb=self._on_cursor_move)
+        if filepath:
+            tab.filepath = filepath
+            tab.set_content(content)
+        else:
+            tab.set_content("# New GravLang file\n\n")
+        self._tabs.append(tab)
+        idx = len(self._tabs) - 1
+        self._build_tab_label(idx)
+        self.switch_tab(idx)
+        return tab
+
+    def _build_tab_label(self, idx: int):
+        t    = self.theme
+        tab  = self._tabs[idx]
+        name = tab.name()
+        frame = tk.Frame(self._tab_scroll_frame, bg=t["BG_MANTLE"],
+                         cursor="hand2", padx=4)
+        frame.pack(side="left", fill="y")
+
+        # top accent line (shown when active)
+        accent = tk.Frame(frame, bg=t["BLUE"], height=2)
+        accent.pack(fill="x")
+
+        inner = tk.Frame(frame, bg=t["BG_MANTLE"])
+        inner.pack(fill="both", expand=True, padx=2)
+
+        # file icon
+        ext = os.path.splitext(name)[1]
+        ic  = tk.Canvas(inner, width=10, height=12,
+                        bg=t["BG_MANTLE"], highlightthickness=0)
+        ic.create_rectangle(1, 1, 9, 11,
+            fill=t["BLUE"] if ext == ".grav" else t["TEXT_SUB"], outline="")
+        ic.pack(side="left", padx=2, pady=8)
+
+        lbl = tk.Label(inner, text=name, bg=t["BG_MANTLE"],
+            fg=t["TEXT_OVERLAY"], font=("Segoe UI", 10), pady=6)
+        lbl.pack(side="left")
+
+        dot = tk.Label(inner, text="●", bg=t["BG_MANTLE"],
+            fg=t["PEACH"], font=("Segoe UI", 8))
+        # not packed until modified
+
+        close = tk.Label(inner, text="×", bg=t["BG_MANTLE"],
+            fg=t["TEXT_OVERLAY"], font=("Segoe UI", 12), padx=4, cursor="hand2")
+        close.pack(side="left")
+
+        _frame_data = {"accent": accent, "lbl": lbl, "dot": dot, "close": close,
+                       "ic": ic, "inner": inner, "frame": frame}  # FIXED: store frame ref for close_tab
+
+        def on_click(e, i=idx):    self.switch_tab(i)
+        def on_close(e, i=idx):    self.close_tab(i)
+        def on_enter(e, w=frame, d=_frame_data):
+            d["close"].pack(side="left")
+        def on_leave(e, w=frame, d=_frame_data):
+            pass  # keep close visible always for simplicity
+
+        for w in [frame, inner, lbl, ic]:
+            w.bind("<Button-1>", on_click)
+        close.bind("<Button-1>", on_close)
+
+        self._tab_labels.append(_frame_data)
+
+    def switch_tab(self, idx: int):
+        t = self.theme
+        for i, tab in enumerate(self._tabs):
+            tab.frame.pack_forget()
+        if 0 <= idx < len(self._tabs):
+            self._active_idx = idx
+            self._tabs[idx].frame.pack(fill="both", expand=True)
+        self._refresh_tab_labels()
+        self._update_title()
+        self._update_status_file()
+
+    def _refresh_tab_labels(self):
+        t = self.theme
+        for i, data in enumerate(self._tab_labels):
+            active = (i == self._active_idx)
+            bg  = t["BG_BASE"] if active else t["BG_MANTLE"]
+            fg  = t["TEXT_MAIN"] if active else t["TEXT_OVERLAY"]
+            data["lbl"].configure(bg=bg, fg=fg)
+            data["inner"].configure(bg=bg)
+            data["close"].configure(bg=bg)
+            data["ic"].configure(bg=bg)
+            data["accent"].configure(bg=t["BLUE"] if active else t["BG_MANTLE"],
+                                     height=2 if active else 1)
+            tab = self._tabs[i]
+            if tab.modified:
+                data["dot"].pack(side="left")
+            else:
+                data["dot"].pack_forget()
+
+    def close_tab(self, idx: int):
+        if len(self._tabs) == 1:
+            self._tabs[0].set_content("")
+            self._tabs[0].filepath = ""
+            self._tabs[0].modified = False
+            self._refresh_tab_labels()
+            self._update_title()
             return
+        tab = self._tabs[idx]
+        if tab.modified:
+            ans = messagebox.askyesnocancel("Unsaved", f"Save {tab.name()} before closing?")
+            if ans is None: return
+            if ans: self.save_file()
+        tab.frame.destroy()
+        self._tabs.pop(idx)
+        lbl_data = self._tab_labels.pop(idx)
+        lbl_data["frame"].destroy()  # FIXED: use stored frame reference instead of fragile .master.master
+        new_idx = min(idx, len(self._tabs) - 1)
+        self._active_idx = -1
+        self.switch_tab(new_idx)
 
-        self.output.config(state=tk.NORMAL)
-        self.output.delete("1.0", tk.END)
-        self._update_status("⏳ Running...")
-        self.root.update_idletasks()
+    def _active_tab(self) -> EditorTab | None:
+        if 0 <= self._active_idx < len(self._tabs):
+            return self._tabs[self._active_idx]
+        return None
 
+    def _active_editor(self) -> tk.Text | None:
+        tab = self._active_tab()
+        return tab.editor if tab else None
+
+    # ── FILE OPERATIONS ───────────────────────────────────────────────────────
+
+    def open_file(self):
+        path = filedialog.askopenfilename(
+            filetypes=[("GravLang", "*.grav"), ("All", "*.*")])
+        if path:
+            self.open_file_path(path)
+
+    def open_file_path(self, path: str):
+        # check if already open
+        for i, tab in enumerate(self._tabs):
+            if tab.filepath == path:
+                self.switch_tab(i)
+                return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        tab = self._active_tab()
+        if tab and not tab.modified and not tab.get_content().strip():
+            tab.filepath = path
+            tab.set_content(content)
+            self._refresh_tab_labels()
+            self._update_title()
+            self._update_status_file()
+            self._file_explorer.set_cwd(os.path.dirname(path))
+        else:
+            self.new_tab(filepath=path, content=content)
+            self._file_explorer.set_cwd(os.path.dirname(path))
+
+    def save_file(self):
+        tab = self._active_tab()
+        if not tab: return
+        if not tab.filepath:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".grav",
+                filetypes=[("GravLang", "*.grav"), ("All", "*.*")])
+            if not path: return
+            tab.filepath = path
+        try:
+            with open(tab.filepath, "w", encoding="utf-8") as f:
+                f.write(tab.get_content())
+            tab.modified = False
+            self._refresh_tab_labels()
+            self._update_title()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    # ── RUN ───────────────────────────────────────────────────────────────────
+
+    def run_code(self):
+        tab = self._active_tab()
+        if not tab: return
+        code = tab.get_content()
+
+        # Clear output before run if the toggle is enabled
+        if getattr(self, "_clear_on_run", None) and self._clear_on_run.get():
+            self._clear_output()
+
+        ts = datetime.now().strftime("%H:%M:%S")
+        self._append_output(f"── Run at {ts} {'─'*30}\n", "sep")
+        self._set_status_running()
+        # Guard: don't start a second run if one is already running
+        if getattr(self, "_is_running", False):
+            return
+        self._is_running = True
+        self._cancel_flag = False
+        self.root.update_idletasks()   # flush the UI so "Running…" shows up
+
+        t_start = time.time()
         lines: list[str] = []
 
-        def capture_print(*args):
-            text = " ".join(str(a) for a in args)
-            lines.append(text)
+        def capture(*args):  # accept multiple args like print(a, b)
+            lines.append(" ".join(str(a) for a in args))
 
+        def _run_in_thread():
+            try:
+                tokens = Lexer(code).tokenize()
+                tree   = Parser(tokens).parse()
+                interp = Interpreter(print_fn=capture, source=code)
+                interp.interpret(tree)
+                elapsed = time.time() - t_start
+                # Snapshot lines NOW before posting to UI thread, avoids race
+                output_lines = list(lines)
+                store = dict(interp.global_env._store)
+                self.root.after(0, lambda: self._finish_run(output_lines, [], elapsed, store))
+            except GravLangError as e:
+                elapsed = time.time() - t_start
+                output_lines = list(lines)
+                self.root.after(0, lambda: self._finish_run(output_lines, [str(e)], elapsed, {}))
+            except Exception as e:
+                elapsed = time.time() - t_start
+                output_lines = list(lines)
+                self.root.after(0, lambda: self._finish_run(output_lines, [f"Internal error: {e}"], elapsed, {}))
+
+        self._run_thread = threading.Thread(target=_run_in_thread, daemon=True)
+        self._run_thread.start()
+
+    def _stop_code(self):
+        """Signal the running thread to stop; show cancellation message."""
+        self._cancel_flag = True
+        # Don't call _finish_run directly — the thread will call it via root.after.
+        # Just show a message immediately and let the thread clean up.
+        self._append_output("⚠ Stop requested — waiting for current operation...\n", "error")
+
+    def _finish_run(self, lines, errors, elapsed, store):
+        self._is_running = False  # clear running guard
+        for line in lines:
+            self._append_output(line + "\n")
+        for err in errors:
+            self._append_output(f"❌ {err}\n", "error")
+        if errors:
+            self._append_output(f"✗ Error in {elapsed:.3f}s\n", "timing")
+            self._set_status_error(elapsed)
+        else:
+            self._append_output(f"✓ Done in {elapsed:.3f}s\n", "timing")
+            self._set_status_done(elapsed)
+        if store:
+            self._inspector.populate(store)
+
+    def _append_output(self, text: str, tag: str = ""):
+        self._output.configure(state="normal")
+        if tag:
+            self._output.insert("end", text, tag)
+        else:
+            self._output.insert("end", text)
+        self._output.configure(state="disabled")
+        self._output.see("end")
+
+    def _clear_output(self):
+        self._output.configure(state="normal")
+        self._output.delete("1.0", "end")
+        self._output.configure(state="disabled")
+
+    def _copy_output(self):
+        content = self._output.get("1.0", "end-1c")
+        self.root.clipboard_clear()
+        self.root.clipboard_append(content)
+
+    # ── STATUS ────────────────────────────────────────────────────────────────
+
+    def _set_status_running(self):
+        t = self.theme
+        self._status_run.configure(text="⏳ Running...",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"])
+
+    def _set_status_done(self, elapsed):
+        t = self.theme
+        self._status_run.configure(text=f"✓ Done in {elapsed:.3f}s",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"])
+
+    def _set_status_error(self, elapsed):
+        t = self.theme
+        self._status_run.configure(text=f"✗ Error {elapsed:.3f}s",
+            bg=t["RED"], fg="#1e1e2e")
+
+    def _on_cursor_move(self, row: int, col: int):
+        t = self.theme
+        self._status_cursor.configure(text=f"Ln {row}, Col {col}")
+        ed = self._active_editor()
+        if ed:
+            total = int(ed.index("end-1c").split(".")[0])
+            self._status_lines.configure(text=f"{total} lines")
+
+    def _on_editor_change(self):
+        self._refresh_tab_labels()
+        self._update_title()
+
+    def _update_title(self):
+        tab  = self._active_tab()
+        name = tab.name() if tab else "untitled.grav"
+        mod  = " ●" if (tab and tab.modified) else ""
+        self.title_lbl.configure(text=f"GravLang IDE — {name}{mod}")
+        self.root.title(f"GravLang IDE — {name}{mod}")
+
+    def _update_status_file(self):
+        tab  = self._active_tab()
+        name = tab.name() if tab else "untitled.grav"
+        self._status_file.configure(text=name)
+
+    # ── UI HELPERS ────────────────────────────────────────────────────────────
+
+    def _toggle_sidebar(self):
+        if self._sidebar_visible:
+            self._sidebar.pack_forget()
+        else:
+            self._sidebar.pack(side="left", fill="y",
+                               before=self._editor_pane)
+        self._sidebar_visible = not self._sidebar_visible
+
+    def _toggle_find(self):
+        if self._findbar.winfo_ismapped():
+            self._findbar.hide()
+        else:
+            self._findbar.show()
+
+    def _minimize_window(self):
+        """Minimize the window to taskbar."""
         try:
-            tokens = Lexer(code).tokenize()
-            tree   = Parser(tokens).parse()
-            interp = Interpreter(print_fn=capture_print, source=code)
-            interp.interpret(tree)
+            import ctypes
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            ctypes.windll.user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE = 6
+        except Exception:
+            self.root.iconify()
 
-            if lines:
-                self.output.insert(tk.END, "\n".join(lines) + "\n")
-            else:
-                self.output.insert(tk.END, "(no output)\n", "info")
-            self._update_status("✓ Done")
+    def _toggle_fullscreen(self):
+        """Toggle maximize / restore using geometry only — no ctypes, no glitches."""
+        self._is_maximized = not getattr(self, "_is_maximized", False)
 
-        except GravLangError as e:
-            if lines:
-                self.output.insert(tk.END, "\n".join(lines) + "\n")
-            self.output.insert(tk.END, f"\n❌ {e}\n", "error")
-            self._update_status("✗ Error")
+        if self._is_maximized:
+            self._prev_geometry = self.root.geometry()
+            # Get usable screen area (excludes taskbar on most systems)
+            sw = self.root.winfo_screenwidth()
+            sh = self.root.winfo_screenheight()
+            # Place at 0,0 with full screen size; taskbar sits on top naturally
+            self.root.geometry(f"{sw}x{sh}+0+0")
+        else:
+            geo = getattr(self, "_prev_geometry", "1280x800+100+100")
+            self.root.geometry(geo)
 
-        except RecursionError:
-            if lines:
-                self.output.insert(tk.END, "\n".join(lines) + "\n")
-            self.output.insert(tk.END, "\n❌ Runtime Error: Stack overflow — maximum recursion depth exceeded\n", "error")
-            self._update_status("✗ Error")
+        # Update button symbol  □ ↔ ❐
+        if hasattr(self, "_win_btns") and len(self._win_btns) > 1:
+            sym = "❐" if self._is_maximized else "□"
+            self._win_btns[1][0].configure(text=sym)
 
-        except Exception as e:
-            self.output.insert(tk.END, f"\n❌ Internal error: {e}\n", "error")
-            self._update_status("✗ Error")
+    def _show_examples(self):
+        t    = self.theme
+        menu = tk.Menu(self.root, tearoff=0,
+            bg=t["BG_SURFACE0"], fg=t["TEXT_MAIN"],
+            activebackground=t["BG_SURFACE1"],
+            activeforeground=t["TEXT_MAIN"],
+            font=("Segoe UI", 10), bd=0, relief="flat")
+        groups = [
+            ["Hello World"],
+            ["Fibonacci", "FizzBuzz", "Bubble Sort"],
+            ["Stack Class", "Calculator Class", "For-In Loop Demo", "Animals (Final Test)"],
+        ]
+        first = True
+        for group in groups:
+            if not first:
+                menu.add_separator()
+            first = False
+            for name in group:
+                if name in SAMPLES:
+                    menu.add_command(label=name,
+                        command=lambda n=name: self._load_sample(n))
+        try:
+            x = self._toolbar.winfo_rootx() + 200
+            y = self._toolbar.winfo_rooty() + 36
+            menu.post(x, y)
+        except Exception:
+            pass
 
-        self.output.config(state=tk.DISABLED)
+    def _load_sample(self, name: str):
+        code = SAMPLES[name]
+        tab  = self._active_tab()
+        if tab and not tab.get_content().strip().replace("# New GravLang file", "").strip():
+            tab.set_content(code)
+            tab.filepath = f"{name.lower().replace(' ','_')}.grav"
+            tab.modified = False
+            self._refresh_tab_labels()
+            self._update_title()
+        else:
+            fname = f"{name.lower().replace(' ','_')}.grav"
+            new_tab = self.new_tab(filepath=fname, content=code)
+            new_tab.modified = False
+            self._refresh_tab_labels()
 
-    def _on_clear(self):
-        self.output.config(state=tk.NORMAL)
-        self.output.delete("1.0", tk.END)
-        self.output.config(state=tk.DISABLED)
-        self._update_status("✓ Ready")
+    def _show_themes(self):
+        t    = self.theme
+        menu = tk.Menu(self.root, tearoff=0,
+            bg=t["BG_SURFACE0"], fg=t["TEXT_MAIN"],
+            activebackground=t["BG_SURFACE1"],
+            activeforeground=t["TEXT_MAIN"],
+            font=("Segoe UI", 10), bd=0, relief="flat")
+        for name in THEMES:
+            menu.add_command(label=("✓ " if name == self.theme_name else "  ") + name,
+                command=lambda n=name: self.apply_theme(n))
+        try:
+            x = self.root.winfo_rootx() + self.root.winfo_width() - 160
+            y = self._toolbar.winfo_rooty() + 36
+            menu.post(x, y)
+        except Exception:
+            pass
 
-    def _on_load(self):
-        path = filedialog.askopenfilename(
-            title="Open GravLang File",
-            filetypes=[("GravLang files", "*.grav"), ("All files", "*.*")],
-        )
-        if path:
-            with open(path, "r", encoding="utf-8") as f:
-                code = f.read()
-            self.editor.delete("1.0", tk.END)
-            self.editor.insert("1.0", code)
-            self._on_change()
+    def apply_theme(self, name: str):
+        if name not in THEMES: return
+        self.theme_name = name
+        self.theme = THEMES[name]
+        t = self.theme
+        self._save_config()
+        # Update all major widgets
+        self._titlebar.configure(bg=t["BG_MANTLE"])
+        self.title_lbl.configure(bg=t["BG_MANTLE"], fg=t["TEXT_SUB"])
+        # Re-color window control buttons
+        if hasattr(self, "_win_btns"):
+            for i, (btn, _, hover_bg) in enumerate(self._win_btns):
+                new_normal = t["BG_MANTLE"]
+                new_hover  = "#c42b1c" if i == 2 else t["BG_SURFACE0"]
+                btn.configure(bg=new_normal, fg=t["TEXT_OVERLAY"])
+                self._win_btns[i] = (btn, new_normal, new_hover)
+                btn.bind("<Enter>", lambda e, w=btn, h=new_hover: w.configure(bg=h, fg="#ffffff"))
+                btn.bind("<Leave>", lambda e, w=btn, nb=new_normal: w.configure(bg=nb, fg=t["TEXT_OVERLAY"]))
+        self._tabbar.configure(bg=t["BG_MANTLE"])
+        self._tab_scroll_frame.configure(bg=t["BG_MANTLE"])
+        self._toolbar.configure(bg=t["BG_MANTLE"])
+        self._body.configure(bg=t["BG_BASE"])
+        self._outer.configure(bg=t["BG_BASE"])
+        self._right.configure(bg=t["BG_BASE"])
+        self._activity_bar.configure(bg=t["BG_MANTLE"])
+        self._sidebar.configure(bg=t["BG_MANTLE"])
+        self._editor_pane.configure(bg=t["BG_BASE"])
+        self._editor_stack.configure(bg=t["BG_BASE"])
+        self._statusbar.configure(bg=t["STATUS_BG"])
+        for lbl in [self._status_lang, self._status_file,
+                    self._status_cursor, self._status_lines, self._status_run]:
+            lbl.configure(bg=t["STATUS_BG"], fg=t["STATUS_FG"])
+        self._output.configure(bg=t["BG_CRUST"], fg=t["GREEN"])
+        self._out_frame.configure(bg=t["BG_CRUST"])
+        self._sash.configure(bg=t["BG_SURFACE1"])
+        if hasattr(self, "_clr_lbl"):
+            active = self._clear_on_run.get()
+            self._clr_lbl.configure(
+                bg=t["BG_MANTLE"],
+                fg=t["BLUE"] if active else t["TEXT_SUB"],
+            )
+        for tab in self._tabs:
+            tab.apply_theme(t)
+        self._inspector._apply_theme(t)
+        self._file_explorer._apply_theme(t)
+        self._findbar._apply_theme(t)
+        self._refresh_tab_labels()
 
-    def _on_save(self):
-        path = filedialog.asksaveasfilename(
-            title="Save GravLang File",
-            defaultextension=".grav",
-            filetypes=[("GravLang files", "*.grav"), ("All files", "*.*")],
-        )
-        if path:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(self.editor.get("1.0", tk.END))
+    def _show_shortcuts(self):
+        t   = self.theme
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Keyboard Shortcuts")
+        dlg.geometry("420x500")
+        dlg.configure(bg=t["BG_MANTLE"])
+        dlg.transient(self.root)
+        dlg.resizable(False, False)
+
+        tk.Label(dlg, text="Keyboard Shortcuts", bg=t["BG_MANTLE"],
+            fg=t["TEXT_MAIN"], font=("Segoe UI", 14, "bold")).pack(pady=(16,8))
+
+        frame = tk.Frame(dlg, bg=t["BG_MANTLE"])
+        frame.pack(fill="both", expand=True, padx=16)
+
+        shortcuts = [
+            ("F5 / Ctrl+Enter", "Run code"),
+            ("Ctrl+O",          "Open file"),
+            ("Ctrl+S",          "Save file"),
+            ("Ctrl+T",          "New tab"),
+            ("Ctrl+W",          "Close tab"),
+            ("Ctrl+Tab",        "Next tab"),
+            ("Ctrl+F",          "Find"),
+            ("Ctrl+H",          "Find & Replace"),
+            ("Ctrl+/",          "Toggle comment"),
+            ("Ctrl+D",          "Duplicate line"),
+            ("Ctrl+Z",          "Undo"),
+            ("Ctrl+Y",          "Redo"),
+            ("Ctrl+L",          "Clear output"),
+            ("Ctrl+I",          "Toggle inspector"),
+            ("Tab",             "Indent / autocomplete"),
+            ("Escape",          "Close find / autocomplete"),
+        ]
+        for key, desc in shortcuts:
+            row = tk.Frame(frame, bg=t["BG_MANTLE"])
+            row.pack(fill="x", pady=2)
+            tk.Label(row, text=key, bg=t["BG_SURFACE0"], fg=t["BLUE"],
+                font=("Consolas", 10), width=18, anchor="w", padx=6, pady=2
+                ).pack(side="left")
+            tk.Label(row, text=desc, bg=t["BG_MANTLE"], fg=t["TEXT_MAIN"],
+                font=("Segoe UI", 10), padx=8
+                ).pack(side="left")
+
+        tk.Button(dlg, text="Close", command=dlg.destroy,
+            bg=t["BLUE"], fg=t["BG_CRUST"], relief="flat",
+            font=("Segoe UI", 10, "bold"), padx=20, pady=4, cursor="hand2"
+            ).pack(pady=12)
+        dlg.bind("<Escape>", lambda e: dlg.destroy())
+
+    # ── GLOBAL BINDINGS ───────────────────────────────────────────────────────
+
+    def _bind_global(self):
+        r = self.root
+        r.bind("<F5>",           lambda e: self.run_code())
+        r.bind("<Control-Return>", lambda e: self.run_code())
+        r.bind("<Control-o>",    lambda e: self.open_file())
+        r.bind("<Control-s>",    lambda e: self.save_file())
+        r.bind("<Control-t>",    lambda e: self.new_tab())
+        r.bind("<Control-w>",    lambda e: self.close_tab(self._active_idx))
+        r.bind("<Control-Tab>",  lambda e: self.switch_tab(
+            (self._active_idx + 1) % max(1, len(self._tabs))))
+        r.bind("<Control-f>",    lambda e: self._toggle_find())
+        r.bind("<Control-h>",    lambda e: self._toggle_find())
+        r.bind("<Control-l>",    lambda e: self._clear_output())
+        r.bind("<Control-i>",    lambda e: self._toggle_inspector())
+
+    def _toggle_inspector(self):
+        if self._inspector_visible:
+            self._insp_frame.pack_forget()
+        else:
+            self._insp_frame.pack(side="right", fill="y")
+        self._inspector_visible = not self._inspector_visible
+
+    # ── CONFIG ────────────────────────────────────────────────────────────────
+
+    def _load_config(self):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_config(self):
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump({"theme": self.theme_name}, f)
+        except Exception:
+            pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────────
+def _hide_titlebar_windows(root: tk.Tk):
+    """
+    Hide the native Windows title bar using DWM/SetWindowLong WITHOUT using
+    overrideredirect — so the window stays registered with the Shell and
+    appears in the taskbar and Alt+Tab normally.
+
+    Steps:
+      1. Remove the WS_CAPTION and WS_THICKFRAME style bits  →  no title bar, no resize border
+      2. Tell DWM the non-client area is 0 on all sides       →  no leftover chrome pixels
+      3. Trigger a frame change so Windows redraws immediately
+    """
+    try:
+        import ctypes, ctypes.wintypes
+
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+
+        # ── Window style constants ────────────────────────────────────────────
+        GWL_STYLE       = -16
+        WS_CAPTION      = 0x00C00000   # title bar + border
+        WS_THICKFRAME   = 0x00040000   # resizable border
+        WS_MAXIMIZEBOX  = 0x00010000
+        WS_MINIMIZEBOX  = 0x00020000
+        WS_SYSMENU      = 0x00080000
+
+        # Remove title bar / resize chrome (keep WS_MINIMIZEBOX so taskbar btn works)
+        style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
+        style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_SYSMENU)
+        style |= WS_MINIMIZEBOX          # keep so Win+D / taskbar click restores
+        ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_STYLE, style)
+
+        # ── DWM: collapse non-client area to zero ─────────────────────────────
+        class MARGINS(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_int), ("right",  ctypes.c_int),
+                        ("top",  ctypes.c_int), ("bottom", ctypes.c_int)]
+
+        margins = MARGINS(0, 0, 0, 0)
+        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
+
+        # ── Force Windows to redraw the frame ────────────────────────────────
+        SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0020   # nosize|nomove|nozorder|framechanged
+        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, SWP_FLAGS)
+
+    except Exception:
+        # Fallback: overrideredirect (taskbar won't show, but window still works)
+        root.overrideredirect(True)
 
 
 def launch_gui():
-    """Create and run the GravLang IDE window."""
     root = tk.Tk()
-    GravLangIDE(root)
+    root.title("GravLang IDE")
+
+    # Center window on screen at startup
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    w, h = 1280, 800
+    x = (sw - w) // 2
+    y = (sh - h) // 2
+    root.geometry(f"{w}x{h}+{x}+{y}")
+
+    # Build UI first, THEN hide the native title bar via DWM (not overrideredirect)
+    # so the window stays in the taskbar and Alt+Tab.
+    app = GravLangIDE(root)
+    root.update()   # ensure HWND is fully created before calling DWM
+    _hide_titlebar_windows(root)
+
     root.mainloop()
+
+
+if __name__ == "__main__":
+    launch_gui()

@@ -15,10 +15,12 @@ import ast_nodes as ast
 
 # Augmented-assignment token map
 _AUG_OPS = {
-    "PLUS_ASSIGN":  "+",
-    "MINUS_ASSIGN": "-",
-    "STAR_ASSIGN":  "*",
-    "SLASH_ASSIGN": "/",
+    "PLUS_ASSIGN":     "+",
+    "MINUS_ASSIGN":    "-",
+    "STAR_ASSIGN":     "*",
+    "SLASH_ASSIGN":    "/",
+    "FLOORDIV_ASSIGN": "//",  # FIXED: added //= augmented operator
+    "MOD_ASSIGN":      "%",   # FIXED: added %= augmented operator
 }
 
 

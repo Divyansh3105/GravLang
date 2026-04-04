@@ -38,6 +38,8 @@ TOKEN_SPEC: list[tuple[str, str]] = [
 
     # Multi-character operators (must come before single-char variants)
     ("POWER",        r"\*\*"),          # ** (power)
+    ("FLOORDIV_ASSIGN", r"//="),       # FIXED: //= (augmented floor-div)
+    ("MOD_ASSIGN",   r"%="),           # FIXED: %= (augmented modulo)
     ("FLOORDIV",     r"//"),            # // (integer division)
     ("PLUS_ASSIGN",  r"\+="),           # += (augmented add)
     ("MINUS_ASSIGN", r"-="),            # -= (augmented sub)
@@ -124,8 +126,22 @@ class Lexer:
     def tokenize(self) -> list[Token]:
         tokens: list[Token] = []
         line = 1
+        last_end = 0  # FIXED: track last match end for single-pass illegal char detection
 
         for mo in _master_re.finditer(self.source):
+            # FIXED: check gap between last match end and current match start
+            if mo.start() > last_end:
+                gap = self.source[last_end:mo.start()]
+                for i, ch in enumerate(gap):
+                    if ch not in " \t\r\n":
+                        pos = last_end + i
+                        bad_line = self.source[:pos].count("\n") + 1
+                        raise LexerError(
+                            f"Unexpected character: {ch!r}", bad_line,
+                            self.get_line(bad_line),
+                        )
+            last_end = mo.end()  # FIXED: advance last_end past this match
+
             kind = mo.lastgroup
             value = mo.group()
 
@@ -141,17 +157,17 @@ class Lexer:
 
             tokens.append(Token(kind, value, line))
 
-        # Detect any characters the regex didn't match (illegal chars)
-        covered = set()
-        for mo in _master_re.finditer(self.source):
-            covered.update(range(mo.start(), mo.end()))
-        for i, ch in enumerate(self.source):
-            if i not in covered and ch not in " \t\r\n":
-                bad_line = self.source[:i].count("\n") + 1
-                raise LexerError(
-                    f"Unexpected character: {ch!r}", bad_line,
-                    self.get_line(bad_line),
-                )
+        # FIXED: check trailing characters after last match (single-pass, no O(n²))
+        if last_end < len(self.source):
+            tail = self.source[last_end:]
+            for i, ch in enumerate(tail):
+                if ch not in " \t\r\n":
+                    pos = last_end + i
+                    bad_line = self.source[:pos].count("\n") + 1
+                    raise LexerError(
+                        f"Unexpected character: {ch!r}", bad_line,
+                        self.get_line(bad_line),
+                    )
 
         tokens.append(Token("EOF", "", line))
         return tokens
