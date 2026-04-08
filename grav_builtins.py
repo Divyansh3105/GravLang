@@ -108,6 +108,7 @@ def _builtin_push(arr, value):
     if not isinstance(arr, list):
         raise TypeError("push() expects an array as first argument")
     arr.append(value)
+    return arr  # FIXED: return the array after mutation
 
 
 def _builtin_pop(arr):
@@ -143,6 +144,7 @@ def _builtin_reverse(arr):
     if not isinstance(arr, list):
         raise TypeError("reverse() expects an array as first argument")
     arr.reverse()
+    return arr  # FIXED: return the array after mutation
 
 
 def _builtin_sort(arr):
