@@ -9,7 +9,8 @@ Operator precedence (low → high):
 """
 
 from __future__ import annotations
-from lexer import Token
+import re as _re
+from lexer import Token, Lexer
 from errors import ParseError
 import ast_nodes as ast
 
@@ -566,6 +567,9 @@ class Parser:
             expr = self._expression()
             self._expect("RPAREN", "Expected ')' after expression")
             return expr
+        if tok.type == "FSTRING":
+            self._advance()
+            return self._desugar_fstring(tok.value, tok.line)
         if tok.type == "LBRACKET":
             return self._array_literal()
 
@@ -574,10 +578,71 @@ class Parser:
     def _array_literal(self) -> ast.ArrayLiteral:
         line = self._current().line
         self._expect("LBRACKET")
-        elements: list = []
-        if self._current().type != "RBRACKET":
+        elements = []
+        while self._current().type != "RBRACKET":
             elements.append(self._expression())
-            while self._match("COMMA"):
-                elements.append(self._expression())
-        self._expect("RBRACKET", "Expected ']' after array elements")
+            if self._current().type == "COMMA":
+                self._advance()
+        self._expect("RBRACKET", "Expected ']' after array literal")
         return ast.ArrayLiteral(elements=elements, line=line)
+
+    def _desugar_fstring(self, raw: str, line: int):
+        """Desugar an f-string token into a chain of BinOp(+) concatenations.
+
+        f"Hello, {name}! Age={age}" becomes the AST equivalent of:
+            "Hello, " + toString(name) + "! Age=" + toString(age)
+
+        Notes
+        -----
+        - Expressions inside {…} are re-lexed and re-parsed, so any valid
+          GravLang expression works: {x + 1}, {obj.field}, {foo(a, b)}, etc.
+        - String literals inside {…} are NOT supported (the outer " would
+          terminate the f-string early). Use variable references instead.
+        - Each expression is wrapped in toString() so booleans print as
+          "true"/"false" and arrays use GravLang format.
+        """
+        # Strip leading f" and trailing "
+        content = raw[2:-1]
+
+        # Apply escape sequences (same as plain STRING handling)
+        content = (
+            content
+            .replace('\\n', '\n')
+            .replace('\\t', '\t')
+            .replace('\\\'', "'")
+            .replace('\\"', '"')
+            .replace('\\\\', '\\')
+        )
+
+        # Split into alternating [literal, expr, literal, expr, ...]
+        # re.split with a capturing group yields:
+        #   [lit0, expr0, lit1, expr1, ...]
+        parts = _re.split(r'\{([^}]*)\}', content)
+
+        nodes: list = []
+        for i, part in enumerate(parts):
+            if i % 2 == 0:
+                # Literal segment
+                if part:   # skip empty strings to keep the tree clean
+                    nodes.append(ast.Literal(value=part, line=line))
+            else:
+                # Expression segment — re-lex + re-parse
+                expr_src = part.strip()
+                if not expr_src:
+                    continue
+                sub_tokens = Lexer(expr_src).tokenize()
+                sub_parser = Parser(sub_tokens)
+                expr_node = sub_parser._expression()
+                # Wrap in toString() so GravLang-native types format correctly
+                nodes.append(
+                    ast.FuncCall(name="toString", args=[expr_node], line=line)
+                )
+
+        if not nodes:
+            return ast.Literal(value="", line=line)
+
+        # Build left-associative chain:  a + b + c + d
+        result = nodes[0]
+        for node in nodes[1:]:
+            result = ast.BinOp(left=result, op="+", right=node, line=line)
+        return result

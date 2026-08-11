@@ -34,7 +34,9 @@ TOKEN_SPEC: list[tuple[str, str]] = [
     # Literals
     ("FLOAT",        r"\d+\.\d+"),
     ("INT",          r"\d+"),
+    ("FSTRING",       r'f"(?:[^"\\{}]|\\.|\{[^}]*\})*"'),  # f"Hello {name}!"
     ("STRING",       r'"(?:[^"\\]|\\.)*"'),
+
 
     # Multi-character operators (must come before single-char variants)
     ("POWER",        r"\*\*"),          # ** (power)
