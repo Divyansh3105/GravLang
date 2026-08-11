@@ -139,7 +139,21 @@ class Parser:
         condition = self._expression()
         self._expect("RPAREN", "Expected ')' after while condition")
         body = self._block()
-        return ast.WhileStmt(condition=condition, body=body, line=line)
+
+        else_body    = None
+        finally_body = None
+        if self._current().type == "ELSE":
+            self._advance()
+            else_body = self._block()
+        if self._current().type == "FINALLY":
+            self._advance()
+            finally_body = self._block()
+
+        return ast.WhileStmt(
+            condition=condition, body=body,
+            else_body=else_body, finally_body=finally_body,
+            line=line,
+        )
 
     # for (...) { ... }  — classic OR for-in
     def _for_stmt(self):
@@ -165,9 +179,20 @@ class Parser:
             iterable = self._expression()
             self._expect("RPAREN", "Expected ')' after iterable")
             body = self._block()
+
+            else_body    = None
+            finally_body = None
+            if self._current().type == "ELSE":
+                self._advance()
+                else_body = self._block()
+            if self._current().type == "FINALLY":
+                self._advance()
+                finally_body = self._block()
+
             return ast.ForInStmt(
                 var=var_tok.value, iterable=iterable,
-                body=body, line=line,
+                body=body, else_body=else_body, finally_body=finally_body,
+                line=line,
             )
 
         # ── Classic for (init; cond; update) ─────────────────────────
@@ -184,7 +209,21 @@ class Parser:
         self._expect("RPAREN", "Expected ')' after for-update")
 
         body = self._block()
-        return ast.ForStmt(init=init, condition=condition, update=update, body=body, line=line)
+
+        else_body    = None
+        finally_body = None
+        if self._current().type == "ELSE":
+            self._advance()
+            else_body = self._block()
+        if self._current().type == "FINALLY":
+            self._advance()
+            finally_body = self._block()
+
+        return ast.ForStmt(
+            init=init, condition=condition, update=update, body=body,
+            else_body=else_body, finally_body=finally_body,
+            line=line,
+        )
 
     # break ;
     def _break_stmt(self) -> ast.BreakStmt:

@@ -163,25 +163,43 @@ class Interpreter:
             return self._exec(node.else_body, env)
 
     def _visit_WhileStmt(self, node: ast.WhileStmt, env: Environment):
-        while self._truthy(self._exec(node.condition, env)):
-            try:
-                self._exec(node.body, env)
-            except BreakSignal:
-                break
-            except ContinueSignal:
-                continue
+        broke = False
+        try:
+            while self._truthy(self._exec(node.condition, env)):
+                try:
+                    self._exec(node.body, env)
+                except BreakSignal:
+                    broke = True
+                    break
+                except ContinueSignal:
+                    continue
+        finally:
+            # else runs only if loop completed normally (no break)
+            if not broke and node.else_body is not None:
+                self._exec(node.else_body, env)
+            # finally always runs
+            if node.finally_body is not None:
+                self._exec(node.finally_body, env)
 
     def _visit_ForStmt(self, node: ast.ForStmt, env: Environment):
         loop_env = Environment(parent=env)
         self._exec(node.init, loop_env)
-        while self._truthy(self._exec(node.condition, loop_env)):
-            try:
-                self._exec(node.body, loop_env)
-            except BreakSignal:
-                break
-            except ContinueSignal:
-                pass  # fall through to update (correct for-loop continue)
-            self._exec(node.update, loop_env)
+        broke = False
+        try:
+            while self._truthy(self._exec(node.condition, loop_env)):
+                try:
+                    self._exec(node.body, loop_env)
+                except BreakSignal:
+                    broke = True
+                    break
+                except ContinueSignal:
+                    pass  # fall through to update (correct for-loop continue)
+                self._exec(node.update, loop_env)
+        finally:
+            if not broke and node.else_body is not None:
+                self._exec(node.else_body, loop_env)
+            if node.finally_body is not None:
+                self._exec(node.finally_body, loop_env)
 
     def _visit_ForInStmt(self, node: ast.ForInStmt, env: Environment):
         iterable = self._exec(node.iterable, env)
@@ -190,15 +208,23 @@ class Interpreter:
                 "for...in loop requires an array", node.line,
                 self._get_source_line(node.line),
             )
-        for item in iterable:
-            loop_env = Environment(parent=env)
-            loop_env.set(node.var, item)
-            try:
-                self._exec(node.body, loop_env)
-            except BreakSignal:
-                break
-            except ContinueSignal:
-                continue
+        broke = False
+        try:
+            for item in iterable:
+                loop_env = Environment(parent=env)
+                loop_env.set(node.var, item)
+                try:
+                    self._exec(node.body, loop_env)
+                except BreakSignal:
+                    broke = True
+                    break
+                except ContinueSignal:
+                    continue
+        finally:
+            if not broke and node.else_body is not None:
+                self._exec(node.else_body, env)
+            if node.finally_body is not None:
+                self._exec(node.finally_body, env)
 
     def _visit_FuncDecl(self, node: ast.FuncDecl, env: Environment):
         fn = GravFunction(node, closure=env)

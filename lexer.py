@@ -99,6 +99,7 @@ KEYWORDS: dict[str, str] = {
     "continue": "CONTINUE",
     "null":     "NULL",
     "in":       "IN",
+    "finally":  "FINALLY",
 }
 
 # Build master regex

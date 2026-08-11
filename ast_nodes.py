@@ -57,28 +57,46 @@ class IfStmt:
 
 @dataclass
 class WhileStmt:
-    """while (condition) { body }"""
+    """while (condition) { body } [else { else_body }] [finally { finally_body }]
+
+    else_body   — runs if the loop exits normally (condition became false), NOT via break.
+    finally_body — runs unconditionally after the loop, whether or not break was used.
+    """
     condition: Any
     body: Any
+    else_body: Any = None
+    finally_body: Any = None
     line: int = 0
 
 
 @dataclass
 class ForStmt:
-    """for (init; condition; update) { body }"""
+    """for (init; condition; update) { body } [else { else_body }] [finally { finally_body }]
+
+    else_body   — runs if the loop exits normally (condition became false), NOT via break.
+    finally_body — runs unconditionally after the loop, whether or not break was used.
+    """
     init: Any
     condition: Any
     update: Any
     body: Any
+    else_body: Any = None
+    finally_body: Any = None
     line: int = 0
 
 
 @dataclass
 class ForInStmt:
-    """for (item in iterable) { body }"""
+    """for (item in iterable) { body } [else { else_body }] [finally { finally_body }]
+
+    else_body   — runs if the loop exits normally (no break hit).
+    finally_body — runs unconditionally after the loop ends.
+    """
     var: str        # loop variable name
     iterable: Any   # expression that evaluates to a list
     body: Any       # Block
+    else_body: Any = None
+    finally_body: Any = None
     line: int = 0
 
 
