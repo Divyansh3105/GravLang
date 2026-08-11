@@ -4,7 +4,7 @@ Built with Python 3.10+ / tkinter only
 """
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog, messagebox, simpledialog
 import os, json, time, threading, re
 from datetime import datetime
 
@@ -27,9 +27,10 @@ except ImportError:
         _store = {}
 
     class Interpreter:
-        def __init__(self, print_fn=None, source=""):
+        def __init__(self, print_fn=None, input_fn=None, source=""):
             self.global_env = _FakeEnv()
             self._print_fn = print_fn or print
+
 
         def interpret(self, tree):
             self._print_fn("GravLang runtime not found.\nRunning in demo mode.")
@@ -1892,12 +1893,41 @@ class GravLangIDE:
         self._is_running = True
         self._cancel_flag = False
         self.root.update_idletasks()   # flush the UI so "Running…" shows up
-
         t_start = time.time()
         lines: list[str] = []
 
         def capture(*args):  # accept multiple args like print(a, b)
-            lines.append(" ".join(str(a) for a in args))
+            text = " ".join(str(a) for a in args)
+            lines.append(text)
+            # Stream output live to the panel (crucial for interactive input() programs)
+            self.root.after(0, lambda t=text: self._append_output(t + "\n"))
+
+        # ── GUI input hook ─────────────────────────────────────────────────
+        # Called from the background run-thread when GravLang code calls input().
+        # Schedules a dialog on the main tkinter thread and blocks until the
+        # user submits, so the interpreter thread waits cleanly.
+        def gui_input_fn(prompt=""):
+            result_holder = [""]
+            event = threading.Event()
+
+            def _show_dialog():
+                # Show the prompt in the output panel first
+                if prompt:
+                    self._append_output(str(prompt), "")
+                val = simpledialog.askstring(
+                    title="Input",
+                    prompt=str(prompt) if prompt else "Enter value:",
+                    parent=self.root,
+                )
+                # Echo the answer (or empty string on cancel) to the output
+                answered = val if val is not None else ""
+                self._append_output(answered + "\n", "")
+                result_holder[0] = answered
+                event.set()
+
+            self.root.after(0, _show_dialog)
+            event.wait()          # block run-thread until dialog closes
+            return result_holder[0]
 
         # Whether the stages window is open — captured for thread closure
         stages_open = (self._stages_win is not None and self._stages_win.is_open())
@@ -1938,7 +1968,7 @@ class GravLangIDE:
                     orig_visit_AugAssign = None
                     orig_call            = None
 
-                    interp = Interpreter(print_fn=capture, source=code)
+                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code)
 
                     _orig_vd  = interp._visit_VarDecl
                     _orig_as  = interp._visit_Assign
@@ -2000,7 +2030,7 @@ class GravLangIDE:
                     # Note: we skip wrapping FuncCall as it would double-eval args
 
                 else:
-                    interp = Interpreter(print_fn=capture, source=code)
+                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code)
 
                 interp.interpret(ast_tree)
                 elapsed = time.time() - t_start
@@ -2032,14 +2062,15 @@ class GravLangIDE:
                     if tl_snap:
                         self.root.after(20, lambda: stages_ref.show_trace(tl_snap))
                     self.root.after(30, lambda: stages_ref.set_status(f"❌  {err_msg}"))
-                self.root.after(0, lambda: self._finish_run(output_lines, [str(e)], elapsed, {}))
+                self.root.after(0, lambda e=e: self._finish_run(output_lines, [str(e)], elapsed, {}))
 
             except Exception as e:
                 elapsed = time.time() - t_start
                 output_lines = list(lines)
                 if stages_ref:
-                    self.root.after(0, lambda: stages_ref.set_status(f"❌  Internal error: {e}"))
-                self.root.after(0, lambda: self._finish_run(output_lines, [f"Internal error: {e}"], elapsed, {}))
+                    self.root.after(0, lambda e=e: stages_ref.set_status(f"❌  Internal error: {e}"))
+                self.root.after(0, lambda e=e: self._finish_run(output_lines, [f"Internal error: {e}"], elapsed, {}))
+
 
         self._run_thread = threading.Thread(target=_run_in_thread, daemon=True)
         self._run_thread.start()
@@ -2053,8 +2084,7 @@ class GravLangIDE:
 
     def _finish_run(self, lines, errors, elapsed, store):
         self._is_running = False  # clear running guard
-        for line in lines:
-            self._append_output(line + "\n")
+        # NOTE: lines already streamed live by capture(); no need to replay them.
         for err in errors:
             self._append_output(f"❌ {err}\n", "error")
         if errors:
@@ -2065,6 +2095,7 @@ class GravLangIDE:
             self._set_status_done(elapsed)
         if store:
             self._inspector.populate(store)
+
 
     def _append_output(self, text: str, tag: str = ""):
         self._output.configure(state="normal")

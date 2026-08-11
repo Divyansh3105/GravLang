@@ -43,12 +43,15 @@ class GravFunction:
 class Interpreter:
     """Tree-walk interpreter for GravLang ASTs."""
 
-    def __init__(self, *, print_fn=None, source: str = ""):
+    def __init__(self, *, print_fn=None, input_fn=None, source: str = ""):
         """
         Parameters
         ----------
         print_fn : callable, optional
             Override for ``print()`` — used by the GUI to redirect output.
+        input_fn : callable, optional
+            Override for ``input()`` — used by the GUI to show a dialog instead
+            of reading from stdin.
         source : str, optional
             Original source code — used for contextual error messages.
         """
@@ -64,6 +67,10 @@ class Interpreter:
 
         if print_fn is not None:
             self.global_env.set("print", print_fn)
+
+        if input_fn is not None:
+            self.global_env.set("input", input_fn)
+
 
     # ── source-line helper ───────────────────────────────────────────
 
