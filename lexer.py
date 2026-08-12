@@ -106,6 +106,9 @@ KEYWORDS: dict[str, str] = {
     "in":       "IN",
     "finally":  "FINALLY",
     "import":   "IMPORT",
+    "try":      "TRY",
+    "catch":    "CATCH",
+    "throw":    "THROW",
 }
 
 # Build master regex

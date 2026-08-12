@@ -26,6 +26,15 @@ class ReturnSignal(Exception):
         self.value = value
 
 
+class GravLangUserError(GravLangRuntimeError):
+    """Raised by user 'throw' statement."""
+    def __init__(self, value: object, line: int | None = None, source_line: str = ""):
+        self.value = value
+        msg = value if isinstance(value, str) else str(value)
+        super().__init__(msg, line, source_line)
+
+
+
 # ── GravLang callable wrapper ────────────────────────────────────────
 
 class GravFunction:
@@ -391,6 +400,34 @@ class Interpreter:
         for stmt in node.statements:
             self._exec(stmt, block_env)
 
+    def _visit_ThrowStmt(self, node: ast.ThrowStmt, env: Environment):
+        val = self._exec(node.value, env)
+        raise GravLangUserError(val, node.line, self._get_source_line(node.line))
+
+    def _visit_TryCatchStmt(self, node: ast.TryCatchStmt, env: Environment):
+        try:
+            try:
+                self._exec(node.try_body, env)
+            except (ReturnSignal, BreakSignal, ContinueSignal):
+                raise
+            except Exception as e:
+                if node.catch_body is not None:
+                    catch_env = Environment(parent=env)
+                    if node.catch_var:
+                        if hasattr(e, "value"):
+                            err_val = e.value
+                        elif hasattr(e, "message"):
+                            err_val = e.message
+                        else:
+                            err_val = str(e)
+                        catch_env.set(node.catch_var, err_val)
+                    self._exec(node.catch_body, catch_env)
+                else:
+                    raise
+        finally:
+            if node.finally_body is not None:
+                self._exec(node.finally_body, env)
+
     # ── class statements ─────────────────────────────────────────────
 
     def _visit_ClassDecl(self, node: ast.ClassDecl, env: Environment):
@@ -515,8 +552,8 @@ class Interpreter:
         if callable(callee) and not isinstance(callee, GravFunction):
             try:
                 return callee(*args)
-            except TypeError as e:
-                raise GravLangRuntimeError(str(e), node.line)
+            except (TypeError, ValueError, KeyError, IndexError) as e:
+                raise GravLangRuntimeError(str(e), node.line, self._get_source_line(node.line))
 
         # User-defined function
         if isinstance(callee, GravFunction):
@@ -563,8 +600,8 @@ class Interpreter:
         if callable(callee):
             try:
                 return callee(*args)
-            except TypeError as e:
-                raise GravLangRuntimeError(str(e), node.line)
+            except (TypeError, ValueError, KeyError, IndexError) as e:
+                raise GravLangRuntimeError(str(e), node.line, self._get_source_line(node.line))
         raise GravLangRuntimeError(
             f"Expression is not callable (got {type(callee).__name__})", node.line,
         )

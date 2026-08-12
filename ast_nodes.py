@@ -175,6 +175,23 @@ class ContinueStmt:
 
 
 @dataclass
+class TryCatchStmt:
+    """try { try_body } catch (catch_var) { catch_body } [finally { finally_body }]"""
+    try_body: Any
+    catch_var: str | None = None
+    catch_body: Any = None
+    finally_body: Any = None
+    line: int = 0
+
+
+@dataclass
+class ThrowStmt:
+    """throw <expr>;"""
+    value: Any
+    line: int = 0
+
+
+@dataclass
 class Block:
     """A { ... } block containing a list of statements."""
     statements: list = field(default_factory=list)

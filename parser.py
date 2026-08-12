@@ -93,6 +93,10 @@ class Parser:
             return self._continue_stmt()
         if tok.type == "IMPORT":
             return self._import_stmt()
+        if tok.type == "TRY":
+            return self._try_stmt()
+        if tok.type == "THROW":
+            return self._throw_stmt()
 
         # Expression statement (assignment or bare expression / call)
         return self._expr_statement()
@@ -256,6 +260,48 @@ class Parser:
                .replace("\\\\", "\\"))
         self._expect("SEMI", "Expected ';' after import path")
         return ast.ImportStmt(path=raw, line=line)
+
+    # try { ... } catch (err) { ... } [finally { ... }]
+    def _try_stmt(self) -> ast.TryCatchStmt:
+        line = self._current().line
+        self._expect("TRY")
+        try_body = self._block()
+
+        catch_var = None
+        catch_body = None
+        if self._current().type == "CATCH":
+            self._advance()
+            if self._current().type == "LPAREN":
+                self._advance()
+                catch_var = self._expect("ID", "Expected error variable name after 'catch('").value
+                self._expect("RPAREN", "Expected ')' after error variable name")
+            elif self._current().type == "ID":
+                catch_var = self._advance().value
+            catch_body = self._block()
+
+        finally_body = None
+        if self._current().type == "FINALLY":
+            self._advance()
+            finally_body = self._block()
+
+        if catch_body is None and finally_body is None:
+            raise ParseError("Expected 'catch' or 'finally' block after 'try'", line)
+
+        return ast.TryCatchStmt(
+            try_body=try_body,
+            catch_var=catch_var,
+            catch_body=catch_body,
+            finally_body=finally_body,
+            line=line,
+        )
+
+    # throw <expr> ;
+    def _throw_stmt(self) -> ast.ThrowStmt:
+        line = self._current().line
+        self._expect("THROW")
+        value = self._expression()
+        self._expect("SEMI", "Expected ';' after throw expression")
+        return ast.ThrowStmt(value=value, line=line)
 
     # Helper: var decl without trailing ;
     def _var_decl_no_semi(self) -> ast.VarDecl:
