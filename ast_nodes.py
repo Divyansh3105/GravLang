@@ -115,6 +115,36 @@ class FuncDecl:
 
 
 @dataclass
+class LambdaExpr:
+    """Anonymous function expression: func(params) { body }
+
+    Produces a first-class function value (GravFunction) when evaluated.
+    May appear anywhere an expression is valid:
+        let double = func(x) { return x * 2; };
+        arr.map(func(x) { return x + 1; });
+    """
+    params: list
+    body: Any
+    variadic: str | None = None   # same semantics as FuncDecl.variadic
+    line: int = 0
+
+
+@dataclass
+class CallExpr:
+    """Call an arbitrary expression as a function: callee(args)
+
+    Unlike FuncCall (which looks up a name), CallExpr evaluates 'callee'
+    as a full expression first. This enables:
+        makeAdder(5)(10)
+        funcs[0](x)
+        getCallback()()
+    """
+    callee: Any     # any expression node that evaluates to a callable
+    args: list = field(default_factory=list)
+    line: int = 0
+
+
+@dataclass
 class ReturnStmt:
     """return <expr>;"""
     value: Any = None

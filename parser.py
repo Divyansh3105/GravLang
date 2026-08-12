@@ -493,8 +493,13 @@ class Parser:
     def _postfix(self):
         node = self._atom()
         while True:
-            if self._current().type == "LPAREN" and isinstance(node, ast.Identifier):
-                node = self._finish_call(node.name, node.line)
+            if self._current().type == "LPAREN":
+                if isinstance(node, ast.Identifier):
+                    # Named call — stays as FuncCall for compatibility
+                    node = self._finish_call(node.name, node.line)
+                else:
+                    # Callee is an expression (lambda, returned func, arr[i], etc.)
+                    node = self._finish_call_expr(node)
                 continue
             if self._current().type == "LBRACKET":
                 node = self._finish_index(node)
@@ -526,6 +531,18 @@ class Parser:
                 args.append(self._expression())
         self._expect("RPAREN", "Expected ')' after arguments")
         return ast.FuncCall(name=name, args=args, line=line)
+
+    def _finish_call_expr(self, callee_node) -> ast.CallExpr:
+        """Parse (args) following an arbitrary callee expression."""
+        line = self._current().line
+        self._expect("LPAREN")
+        args: list = []
+        if self._current().type != "RPAREN":
+            args.append(self._expression())
+            while self._match("COMMA"):
+                args.append(self._expression())
+        self._expect("RPAREN", "Expected ')' after arguments")
+        return ast.CallExpr(callee=callee_node, args=args, line=line)
 
     def _finish_index(self, array_node) -> ast.ArrayIndex | ast.ArraySlice:
         line = self._current().line
@@ -590,6 +607,8 @@ class Parser:
         if tok.type == "FSTRING":
             self._advance()
             return self._desugar_fstring(tok.value, tok.line)
+        if tok.type == "FUNC":
+            return self._lambda_expr()
         if tok.type == "LBRACE":
             return self._dict_literal()
         if tok.type == "LBRACKET":
@@ -624,6 +643,41 @@ class Parser:
                 self._advance()
         self._expect("RBRACE", "Expected '}' after dict literal")
         return ast.DictLiteral(keys=keys, values=values, line=line)
+
+    def _lambda_expr(self) -> ast.LambdaExpr:
+        """Parse an anonymous function expression: func(params) { body }
+
+        The FUNC keyword is consumed here; there is no name.
+        Supports the same parameter syntax as _func_decl, including ...rest.
+        """
+        line = self._current().line
+        self._expect("FUNC")
+        self._expect("LPAREN", "Expected '(' after 'func' in lambda expression")
+
+        params: list[str] = []
+        variadic: str | None = None
+
+        while self._current().type != "RPAREN" and self._current().type != "EOF":
+            if self._current().type == "ELLIPSIS":
+                self._advance()
+                var_tok = self._expect("ID", "Expected parameter name after '...'")
+                variadic = var_tok.value
+                if self._current().type == "COMMA":
+                    self._advance()
+                if self._current().type != "RPAREN":
+                    raise ParseError(
+                        "Variadic parameter '...' must be the last parameter",
+                        self._current().line,
+                    )
+                break
+            params.append(self._expect("ID", "Expected parameter name").value)
+            if self._current().type == "COMMA":
+                self._advance()
+
+        self._expect("RPAREN", "Expected ')' after lambda parameters")
+        body = self._block()
+        return ast.LambdaExpr(params=params, body=body, variadic=variadic, line=line)
+
 
     def _desugar_fstring(self, raw: str, line: int):
         """Desugar an f-string token into a chain of BinOp(+) concatenations.

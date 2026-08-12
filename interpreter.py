@@ -380,6 +380,51 @@ class Interpreter:
 
         raise GravLangRuntimeError(f"'{node.name}' is not callable", node.line)
 
+    def _visit_LambdaExpr(self, node: ast.LambdaExpr, env: Environment):
+        """Evaluate func(params){body} in expression position → a GravFunction value.
+
+        The current environment is captured as the closure so the lambda
+        can close over local variables:
+            let x = 10;
+            let add_x = func(n) { return n + x; };
+            add_x(5)   # → 15
+        """
+        # Build a synthetic FuncDecl with a placeholder name so GravFunction
+        # can be called by _call_function without any changes.
+        synthetic_decl = ast.FuncDecl(
+            name="<lambda>",
+            params=node.params,
+            body=node.body,
+            variadic=node.variadic,
+            line=node.line,
+        )
+        return GravFunction(synthetic_decl, closure=env)
+
+    def _visit_CallExpr(self, node: ast.CallExpr, env: Environment):
+        """Call an arbitrary expression value as a function.
+
+        Handles:
+          - makeAdder(5)(10)  — chain of calls
+          - funcs[0](x)       — function stored in array
+          - getCallback()()   — function returned by a call
+          - (func(x){return x*2;})(7)  — immediately-invoked lambda
+        """
+        callee = self._exec(node.callee, env)
+        args = [self._exec(arg, env) for arg in node.args]
+
+        if isinstance(callee, GravLangClass):
+            return self._instantiate(callee, args, node.line)
+        if isinstance(callee, GravFunction):
+            return self._call_function(callee, args, node.line)
+        if callable(callee):
+            try:
+                return callee(*args)
+            except TypeError as e:
+                raise GravLangRuntimeError(str(e), node.line)
+        raise GravLangRuntimeError(
+            f"Expression is not callable (got {type(callee).__name__})", node.line,
+        )
+
     # ── array expressions ────────────────────────────────────────────
 
     def _visit_ArrayLiteral(self, node: ast.ArrayLiteral, env: Environment):
