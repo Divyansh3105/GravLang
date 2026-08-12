@@ -570,6 +570,8 @@ class Parser:
         if tok.type == "FSTRING":
             self._advance()
             return self._desugar_fstring(tok.value, tok.line)
+        if tok.type == "LBRACE":
+            return self._dict_literal()
         if tok.type == "LBRACKET":
             return self._array_literal()
 
@@ -585,6 +587,23 @@ class Parser:
                 self._advance()
         self._expect("RBRACKET", "Expected ']' after array literal")
         return ast.ArrayLiteral(elements=elements, line=line)
+
+    def _dict_literal(self) -> ast.DictLiteral:
+        """Parse { key: value, key: value, ... } as a DictLiteral node."""
+        line = self._current().line
+        self._expect("LBRACE", "Expected '{'")
+        keys: list = []
+        values: list = []
+        while self._current().type != "RBRACE" and self._current().type != "EOF":
+            key_node = self._expression()
+            self._expect("COLON", "Expected ':' after dict key")
+            val_node = self._expression()
+            keys.append(key_node)
+            values.append(val_node)
+            if self._current().type == "COMMA":
+                self._advance()
+        self._expect("RBRACE", "Expected '}' after dict literal")
+        return ast.DictLiteral(keys=keys, values=values, line=line)
 
     def _desugar_fstring(self, raw: str, line: int):
         """Desugar an f-string token into a chain of BinOp(+) concatenations.

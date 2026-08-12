@@ -28,10 +28,10 @@ def _builtin_input(prompt=""):
 # ── Introspection ────────────────────────────────────────────────────
 
 def _builtin_len(value):
-    """len(string_or_array) → integer length."""
-    if isinstance(value, (str, list)):
+    """len(string_or_array_or_dict) → integer length."""
+    if isinstance(value, (str, list, dict)):
         return len(value)
-    raise TypeError(f"len() expects a string or array, got {type(value).__name__}")
+    raise TypeError(f"len() expects a string, array, or dict; got {type(value).__name__}")
 
 
 def _builtin_type(value):
@@ -51,6 +51,8 @@ def _builtin_type(value):
         return "string"
     if isinstance(value, list):
         return "array"
+    if isinstance(value, dict):
+        return "dict"
     return "unknown"
 
 
@@ -98,7 +100,54 @@ def _builtin_toString(value):
             else:
                 parts.append(str(v))
         return "[" + ", ".join(parts) + "]"
+    if isinstance(value, dict):
+        parts = []
+        for k, v in value.items():
+            k_str = f'"{k}"' if isinstance(k, str) else str(k)
+            if isinstance(v, str):
+                v_str = f'"{v}"'
+            elif isinstance(v, bool):
+                v_str = "true" if v else "false"
+            elif v is None:
+                v_str = "null"
+            else:
+                v_str = str(v)
+            parts.append(f"{k_str}: {v_str}")
+        return "{" + ", ".join(parts) + "}"
     return str(value)
+
+
+# ── Dict operations ───────────────────────────────────────────────────
+
+def _builtin_keys(d):
+    """keys(dict) → array of all keys."""
+    if not isinstance(d, dict):
+        raise TypeError("keys() expects a dict")
+    return list(d.keys())
+
+
+def _builtin_values(d):
+    """values(dict) → array of all values."""
+    if not isinstance(d, dict):
+        raise TypeError("values() expects a dict")
+    return list(d.values())
+
+
+def _builtin_has(d, key):
+    """has(dict, key) → true if key exists in dict."""
+    if not isinstance(d, dict):
+        raise TypeError("has() expects a dict as first argument")
+    return key in d
+
+
+def _builtin_del(d, key):
+    """del(dict, key) → remove key from dict; raises error if key missing."""
+    if not isinstance(d, dict):
+        raise TypeError("del() expects a dict as first argument")
+    if key not in d:
+        raise KeyError(f"Key {key!r} not found in dict")
+    del d[key]
+
 
 
 # ── Array operations ─────────────────────────────────────────────────
@@ -168,12 +217,18 @@ BUILTINS: dict[str, callable] = {
     "toInt":    _builtin_toInt,
     "toFloat":  _builtin_toFloat,
     "toString": _builtin_toString,
+    # array
     "push":     _builtin_push,
     "pop":      _builtin_pop,
     "remove":   _builtin_remove,
     "contains": _builtin_contains,
     "reverse":  _builtin_reverse,
     "sort":     _builtin_sort,
+    # dict
+    "keys":     _builtin_keys,
+    "values":   _builtin_values,
+    "has":      _builtin_has,
+    "del":      _builtin_del,
 }
 
 

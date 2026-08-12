@@ -388,17 +388,27 @@ class Interpreter:
     def _visit_ArrayIndex(self, node: ast.ArrayIndex, env: Environment):
         array = self._exec(node.array, env)
         index = self._exec(node.index, env)
-        if isinstance(array, str):  # FIXED: support string indexing
+        # ── dict read: any hashable key ─────────────────────────────
+        if isinstance(array, dict):
+            if index not in array:
+                raise GravLangRuntimeError(
+                    f"Key {index!r} not found in dict", node.line,
+                    self._get_source_line(node.line),
+                )
+            return array[index]
+        # ── string indexing ─────────────────────────────────────────
+        if isinstance(array, str):
             if not isinstance(index, int):
                 raise GravLangRuntimeError("String index must be an integer", node.line)
             try:
-                return array[index]  # FIXED: return single-character string
+                return array[index]
             except IndexError:
                 raise GravLangRuntimeError(
                     f"String index {index} out of range (length {len(array)})", node.line,
                 )
+        # ── array indexing ──────────────────────────────────────────
         if not isinstance(array, list):
-            raise GravLangRuntimeError("Indexing requires an array or string", node.line)  # FIXED: updated error msg
+            raise GravLangRuntimeError("Indexing requires an array, dict, or string", node.line)
         if not isinstance(index, int):
             raise GravLangRuntimeError("Array index must be an integer", node.line)
         try:
@@ -412,8 +422,13 @@ class Interpreter:
         array = self._exec(node.array, env)
         index = self._exec(node.index, env)
         value = self._exec(node.value, env)
+        # ── dict write: any hashable key ────────────────────────────
+        if isinstance(array, dict):
+            array[index] = value
+            return
+        # ── array write ─────────────────────────────────────────────
         if not isinstance(array, list):
-            raise GravLangRuntimeError("Index assignment requires an array", node.line)
+            raise GravLangRuntimeError("Index assignment requires an array or dict", node.line)
         if not isinstance(index, int):
             raise GravLangRuntimeError("Array index must be an integer", node.line)
         try:
@@ -422,6 +437,35 @@ class Interpreter:
             raise GravLangRuntimeError(
                 f"Array index {index} out of range (length {len(array)})", node.line,
             )
+
+    # ── dict expressions ──────────────────────────────────────────────
+
+    def _visit_DictLiteral(self, node: ast.DictLiteral, env: Environment):
+        result = {}
+        for k_node, v_node in zip(node.keys, node.values):
+            key = self._exec(k_node, env)
+            val = self._exec(v_node, env)
+            result[key] = val
+        return result
+
+    def _visit_DictIndex(self, node: ast.DictIndex, env: Environment):
+        """Explicit DictIndex node (future use; currently dict access uses ArrayIndex)."""
+        d = self._exec(node.obj, env)
+        key = self._exec(node.key, env)
+        if not isinstance(d, dict):
+            raise GravLangRuntimeError("Expected a dict", node.line)
+        if key not in d:
+            raise GravLangRuntimeError(f"Key {key!r} not found in dict", node.line)
+        return d[key]
+
+    def _visit_DictAssign(self, node: ast.DictAssign, env: Environment):
+        """Explicit DictAssign node (future use; currently dict write uses ArrayAssign)."""
+        d = self._exec(node.obj, env)
+        key = self._exec(node.key, env)
+        val = self._exec(node.value, env)
+        if not isinstance(d, dict):
+            raise GravLangRuntimeError("Expected a dict", node.line)
+        d[key] = val
 
     def _visit_ArraySlice(self, node: ast.ArraySlice, env: Environment):
         array = self._exec(node.array, env)

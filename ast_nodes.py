@@ -210,6 +210,37 @@ class ArraySlice:
     line: int = 0
 
 
+# ── Dictionary nodes ───────────────────────────────────────────────────
+
+@dataclass
+class DictLiteral:
+    """Dict literal: { key: value, ... }
+
+    keys   — list of expression nodes (evaluated as dict keys).
+    values — parallel list of value expression nodes.
+    """
+    keys: list = field(default_factory=list)
+    values: list = field(default_factory=list)
+    line: int = 0
+
+
+@dataclass
+class DictIndex:
+    """Dict read: dict[key]"""
+    obj: Any
+    key: Any
+    line: int = 0
+
+
+@dataclass
+class DictAssign:
+    """Dict write: dict[key] = value"""
+    obj: Any
+    key: Any
+    value: Any
+    line: int = 0
+
+
 # ── Class / OOP nodes ──────────────────────────────────────────────
 
 @dataclass
