@@ -514,11 +514,20 @@ class Interpreter:
                 node.line, self._get_source_line(node.line),
             )
         args = [self._exec(arg, env) for arg in node.args]
-        if len(args) != len(method_decl.params):
-            raise GravLangRuntimeError(
-                f"Method '{node.method}' expects {len(method_decl.params)} "
-                f"argument(s), got {len(args)}", node.line,
-            )
+        n_fixed = len(method_decl.params)
+        has_variadic = method_decl.variadic is not None
+        if has_variadic:
+            if len(args) < n_fixed:
+                raise GravLangRuntimeError(
+                    f"Method '{node.method}' expects at least {n_fixed} "
+                    f"argument(s), got {len(args)}", node.line,
+                )
+        else:
+            if len(args) != n_fixed:
+                raise GravLangRuntimeError(
+                    f"Method '{node.method}' expects {n_fixed} "
+                    f"argument(s), got {len(args)}", node.line,
+                )
         # Call with depth tracking
         self._call_depth += 1
         if self._call_depth > self._max_depth:
@@ -532,6 +541,8 @@ class Interpreter:
             method_env.set("self", obj)
             for param, arg in zip(method_decl.params, args):
                 method_env.set(param, arg)
+            if has_variadic:
+                method_env.set(method_decl.variadic, list(args[n_fixed:]))
             try:
                 self._exec(method_decl.body, method_env)
             except ReturnSignal as ret:
@@ -543,11 +554,23 @@ class Interpreter:
     # ── helper: call a GravFunction (with depth tracking) ────────────
 
     def _call_function(self, fn: GravFunction, args: list, line: int):
-        if len(args) != len(fn.decl.params):
-            raise GravLangRuntimeError(
-                f"Function '{fn.decl.name}' expects {len(fn.decl.params)} "
-                f"argument(s), got {len(args)}", line,
-            )
+        decl = fn.decl
+        n_fixed = len(decl.params)
+
+        # ── arity check ────────────────────────────────────────────────
+        if decl.variadic is None:
+            if len(args) != n_fixed:
+                raise GravLangRuntimeError(
+                    f"Function '{decl.name}' expects {n_fixed} argument(s), "
+                    f"got {len(args)}", line,
+                )
+        else:
+            if len(args) < n_fixed:
+                raise GravLangRuntimeError(
+                    f"Function '{decl.name}' expects at least {n_fixed} "
+                    f"argument(s), got {len(args)}", line,
+                )
+
         self._call_depth += 1
         if self._call_depth > self._max_depth:
             self._call_depth = 0
@@ -557,10 +580,14 @@ class Interpreter:
             )
         try:
             call_env = Environment(parent=fn.closure)
-            for param, arg in zip(fn.decl.params, args):
+            # bind fixed params
+            for param, arg in zip(decl.params, args):
                 call_env.set(param, arg)
+            # bind variadic param (pack remaining args into a list)
+            if decl.variadic is not None:
+                call_env.set(decl.variadic, list(args[n_fixed:]))
             try:
-                self._exec(fn.decl.body, call_env)
+                self._exec(decl.body, call_env)
             except ReturnSignal as ret:
                 return ret.value
             return None

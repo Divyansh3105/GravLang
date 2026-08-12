@@ -102,10 +102,15 @@ class ForInStmt:
 
 @dataclass
 class FuncDecl:
-    """func <name>(<params>) { body }"""
+    """func <name>(<params> [, ...<variadic>]) { body }
+
+    variadic -- if not None, the name of the variadic parameter that
+                collects all excess positional arguments into a list.
+    """
     name: str
     params: list
     body: Any
+    variadic: str | None = None   # name of ...rest param, or None
     line: int = 0
 
 

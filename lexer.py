@@ -52,6 +52,9 @@ TOKEN_SPEC: list[tuple[str, str]] = [
     ("EQ",           r"=="),
     ("NEQ",          r"!="),
 
+    # Variadic spread operator — must come before DOT so '...' matches first
+    ("ELLIPSIS",     r"\.\.\." ),
+
     # Single-character operators & punctuation
     ("PLUS",         r"\+"),
     ("MINUS",        r"-"),

@@ -277,14 +277,34 @@ class Parser:
         self._expect("LPAREN", "Expected '(' after function name")
 
         params: list[str] = []
-        if self._current().type != "RPAREN":
+        variadic: str | None = None
+
+        while self._current().type != "RPAREN" and self._current().type != "EOF":
+            if self._current().type == "ELLIPSIS":
+                # ...rest  — must be the last parameter
+                self._advance()
+                var_tok = self._expect("ID", "Expected parameter name after '...'")
+                variadic = var_tok.value
+                # Consume optional trailing comma, then stop
+                if self._current().type == "COMMA":
+                    self._advance()
+                if self._current().type != "RPAREN":
+                    raise ParseError(
+                        "Variadic parameter '...' must be the last parameter",
+                        self._current().line,
+                    )
+                break
             params.append(self._expect("ID", "Expected parameter name").value)
-            while self._match("COMMA"):
-                params.append(self._expect("ID", "Expected parameter name").value)
+            if self._current().type == "COMMA":
+                self._advance()
 
         self._expect("RPAREN", "Expected ')' after parameters")
         body = self._block()
-        return ast.FuncDecl(name=name_tok.value, params=params, body=body, line=line)
+        return ast.FuncDecl(
+            name=name_tok.value, params=params,
+            body=body, variadic=variadic, line=line,
+        )
+
 
     # return expr? ;
     def _return_stmt(self) -> ast.ReturnStmt:
