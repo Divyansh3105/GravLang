@@ -1659,6 +1659,30 @@ class GravLangIDE:
         self._output.tag_configure("timing", foreground=t["BLUE"])
         self._output.tag_configure("sep",    foreground=t["TEXT_SUB"])
 
+        # ── Inline Input Bar (hidden by default) ─────────────────────────────
+        self._input_bar = tk.Frame(self._out_frame, bg=t["BG_MANTLE"])
+        self._input_prompt_lbl = tk.Label(
+            self._input_bar, text="Input:", bg=t["BG_MANTLE"], fg=t["PEACH"],
+            font=("Consolas", 10, "bold")
+        )
+        self._input_prompt_lbl.pack(side="left", padx=(8, 4), pady=4)
+        self._input_var = tk.StringVar()
+        self._input_entry = tk.Entry(
+            self._input_bar, textvariable=self._input_var,
+            bg=t["BG_SURFACE0"], fg=t["TEXT_MAIN"],
+            insertbackground=t["FG_CURSOR"], font=("Consolas", 10),
+            relief="flat", bd=0, highlightthickness=1,
+            highlightbackground=t["BG_SURFACE1"], highlightcolor=t["BLUE"]
+        )
+        self._input_entry.pack(side="left", fill="x", expand=True, padx=4, pady=4)
+        self._input_btn = tk.Button(
+            self._input_bar, text="Enter ↵",
+            bg=t["BLUE"], fg=t["STATUS_FG"],
+            font=("Segoe UI", 9, "bold"), relief="flat", bd=0,
+            cursor="hand2", activebackground=t["LAVENDER"], activeforeground=t["STATUS_FG"]
+        )
+        self._input_btn.pack(side="right", padx=(4, 8), pady=4)
+
         # ── Inspector (right) ────────────────────────────────────────────────
         self._insp_frame = tk.Frame(self._bottom, bg=t["BG_MANTLE"], width=260)
         self._insp_frame.pack(side="right", fill="y")
@@ -1751,8 +1775,8 @@ class GravLangIDE:
         _frame_data = {"accent": accent, "lbl": lbl, "dot": dot, "close": close,
                        "ic": ic, "inner": inner, "frame": frame}  # FIXED: store frame ref for close_tab
 
-        def on_click(e, i=idx):    self.switch_tab(i)
-        def on_close(e, i=idx):    self.close_tab(i)
+        def on_click(e, t=tab):    self.switch_tab(t)
+        def on_close(e, t=tab):    self.close_tab(t)
         def on_enter(e, w=frame, d=_frame_data):
             d["close"].pack(side="left")
         def on_leave(e, w=frame, d=_frame_data):
@@ -1764,13 +1788,22 @@ class GravLangIDE:
 
         self._tab_labels.append(_frame_data)
 
-    def switch_tab(self, idx: int):
+    def switch_tab(self, target: int | EditorTab):
+        if isinstance(target, EditorTab):
+            if target not in self._tabs:
+                return
+            idx = self._tabs.index(target)
+        else:
+            idx = target
+
+        if not (0 <= idx < len(self._tabs)):
+            return
+
         t = self.theme
         for i, tab in enumerate(self._tabs):
             tab.frame.pack_forget()
-        if 0 <= idx < len(self._tabs):
-            self._active_idx = idx
-            self._tabs[idx].frame.pack(fill="both", expand=True)
+        self._active_idx = idx
+        self._tabs[idx].frame.pack(fill="both", expand=True)
         self._refresh_tab_labels()
         self._update_title()
         self._update_status_file()
@@ -1793,7 +1826,17 @@ class GravLangIDE:
             else:
                 data["dot"].pack_forget()
 
-    def close_tab(self, idx: int):
+    def close_tab(self, target: int | EditorTab):
+        if isinstance(target, EditorTab):
+            if target not in self._tabs:
+                return
+            idx = self._tabs.index(target)
+        else:
+            idx = target
+
+        if not (0 <= idx < len(self._tabs)):
+            return
+
         if len(self._tabs) == 1:
             self._tabs[0].set_content("")
             self._tabs[0].filepath = ""
@@ -1801,6 +1844,7 @@ class GravLangIDE:
             self._refresh_tab_labels()
             self._update_title()
             return
+
         tab = self._tabs[idx]
         if tab.modified:
             ans = messagebox.askyesnocancel("Unsaved", f"Save {tab.name()} before closing?")
@@ -1809,7 +1853,7 @@ class GravLangIDE:
         tab.frame.destroy()
         self._tabs.pop(idx)
         lbl_data = self._tab_labels.pop(idx)
-        lbl_data["frame"].destroy()  # FIXED: use stored frame reference instead of fragile .master.master
+        lbl_data["frame"].destroy()  # store frame reference instead of fragile .master.master
         new_idx = min(idx, len(self._tabs) - 1)
         self._active_idx = -1
         self.switch_tab(new_idx)
@@ -1904,29 +1948,57 @@ class GravLangIDE:
 
         # ── GUI input hook ─────────────────────────────────────────────────
         # Called from the background run-thread when GravLang code calls input().
-        # Schedules a dialog on the main tkinter thread and blocks until the
-        # user submits, so the interpreter thread waits cleanly.
+        # Displays the inline input bar at the bottom of the output panel and
+        # blocks until the user submits via Enter key or button click.
         def gui_input_fn(prompt=""):
             result_holder = [""]
             event = threading.Event()
+            self._active_input_event = event
 
-            def _show_dialog():
-                # Show the prompt in the output panel first
+            def _show_inline_input():
+                p_text = str(prompt) if prompt else "Input:"
+                if p_text and not p_text.endswith(" ") and not p_text.endswith(":"):
+                    p_text += ":"
                 if prompt:
-                    self._append_output(str(prompt), "")
-                val = simpledialog.askstring(
-                    title="Input",
-                    prompt=str(prompt) if prompt else "Enter value:",
-                    parent=self.root,
-                )
-                # Echo the answer (or empty string on cancel) to the output
-                answered = val if val is not None else ""
-                self._append_output(answered + "\n", "")
-                result_holder[0] = answered
-                event.set()
+                    self._append_output(str(prompt))
 
-            self.root.after(0, _show_dialog)
-            event.wait()          # block run-thread until dialog closes
+                self._input_prompt_lbl.configure(text=p_text)
+                self._input_var.set("")
+
+                # Crucial: Unpack _output, pack _input_bar at bottom first, then repack _output top expand
+                # This guarantees _input_bar receives height at the bottom of out_frame.
+                self._output.pack_forget()
+                self._input_bar.pack(side="bottom", fill="x", padx=4, pady=(0, 4))
+                self._output.pack(side="top", fill="both", expand=True, padx=4, pady=4)
+
+                self._input_entry.focus_set()
+                self._input_entry.focus_force()
+
+                def _on_output_click(evt):
+                    if self._input_bar.winfo_ismapped():
+                        self._input_entry.focus_set()
+
+                self._output.bind("<Button-1>", _on_output_click)
+
+                def _submit(evt=None):
+                    answered = self._input_var.get()
+                    try:
+                        self._output.unbind("<Button-1>")
+                    except Exception:
+                        pass
+                    self._input_bar.pack_forget()
+                    self._input_entry.unbind("<Return>")
+                    self._input_btn.configure(command=lambda: None)
+                    self._active_input_event = None
+                    self._append_output(answered + "\n", "")
+                    result_holder[0] = answered
+                    event.set()
+
+                self._input_entry.bind("<Return>", _submit)
+                self._input_btn.configure(command=_submit)
+
+            self.root.after(0, _show_inline_input)
+            event.wait()          # block run-thread until input submitted
             return result_holder[0]
 
         # Whether the stages window is open — captured for thread closure
@@ -2078,8 +2150,10 @@ class GravLangIDE:
     def _stop_code(self):
         """Signal the running thread to stop; show cancellation message."""
         self._cancel_flag = True
-        # Don't call _finish_run directly — the thread will call it via root.after.
-        # Just show a message immediately and let the thread clean up.
+        if hasattr(self, "_input_bar"):
+            self.root.after(0, lambda: self._input_bar.pack_forget())
+        if getattr(self, "_active_input_event", None):
+            self._active_input_event.set()
         self._append_output("⚠ Stop requested — waiting for current operation...\n", "error")
 
     def _finish_run(self, lines, errors, elapsed, store):
@@ -2302,6 +2376,18 @@ class GravLangIDE:
             self._clr_lbl.configure(
                 bg=t["BG_MANTLE"],
                 fg=t["BLUE"] if active else t["TEXT_SUB"],
+            )
+        if hasattr(self, "_input_bar"):
+            self._input_bar.configure(bg=t["BG_MANTLE"])
+            self._input_prompt_lbl.configure(bg=t["BG_MANTLE"], fg=t["PEACH"])
+            self._input_entry.configure(
+                bg=t["BG_SURFACE0"], fg=t["TEXT_MAIN"],
+                insertbackground=t["FG_CURSOR"],
+                highlightbackground=t["BG_SURFACE1"], highlightcolor=t["BLUE"]
+            )
+            self._input_btn.configure(
+                bg=t["BLUE"], fg=t["STATUS_FG"],
+                activebackground=t["LAVENDER"], activeforeground=t["STATUS_FG"]
             )
         for tab in self._tabs:
             tab.apply_theme(t)
