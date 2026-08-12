@@ -1,0 +1,47 @@
+# lib/strings.grav — GravLang string utilities module
+
+func repeat(s, n) {
+    let result = "";
+    let i = 0;
+    while (i < n) { result = result + s; i += 1; }
+    return result;
+}
+
+func startsWith(s, prefix) {
+    if (len(prefix) > len(s)) { return false; }
+    let i = 0;
+    while (i < len(prefix)) {
+        if (s[i] != prefix[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+func endsWith(s, suffix) {
+    let sLen = len(s);
+    let sufLen = len(suffix);
+    if (sufLen > sLen) { return false; }
+    let i = 0;
+    while (i < sufLen) {
+        if (s[sLen - sufLen + i] != suffix[i]) { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+func capitalize(s) {
+    if (len(s) == 0) { return s; }
+    return s[0] + s;   # placeholder — real impl needs char ops
+}
+
+func padLeft(s, width, ch) {
+    let result = s;
+    while (len(result) < width) { result = ch + result; }
+    return result;
+}
+
+func padRight(s, width, ch) {
+    let result = s;
+    while (len(result) < width) { result = result + ch; }
+    return result;
+}

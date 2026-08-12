@@ -152,6 +152,17 @@ class ReturnStmt:
 
 
 @dataclass
+class ImportStmt:
+    """import "path/to/module.grav";
+
+    path  — the literal string path as written in source (may be relative).
+    The interpreter resolves it relative to the importing file's directory.
+    """
+    path: str
+    line: int = 0
+
+
+@dataclass
 class BreakStmt:
     """break;"""
     line: int = 0

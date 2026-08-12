@@ -6,6 +6,7 @@ Uses the visitor pattern: ``visit(node)`` dispatches to
 """
 
 from __future__ import annotations
+import os
 import sys
 import ast_nodes as ast
 from environment import Environment
@@ -43,7 +44,8 @@ class GravFunction:
 class Interpreter:
     """Tree-walk interpreter for GravLang ASTs."""
 
-    def __init__(self, *, print_fn=None, input_fn=None, source: str = ""):
+    def __init__(self, *, print_fn=None, input_fn=None, source: str = "",
+                 current_file: str = "", _imported_paths: set | None = None):
         """
         Parameters
         ----------
@@ -54,12 +56,22 @@ class Interpreter:
             of reading from stdin.
         source : str, optional
             Original source code — used for contextual error messages.
+        current_file : str, optional
+            Absolute path of the file being interpreted.  Used to resolve
+            relative import paths.  Empty string when running inline (GUI/REPL).
+        _imported_paths : set, optional
+            Shared set of already-imported absolute paths.  Passed down through
+            child interpreters to detect circular imports.
         """
         self.global_env = Environment()
         register_builtins(self.global_env)
 
         # Source lines for error messages
         self._source_lines = source.splitlines() if source else []
+
+        # Module system
+        self._current_file    = os.path.abspath(current_file) if current_file else ""
+        self._imported_paths  = _imported_paths if _imported_paths is not None else set()
 
         # Call-stack depth tracking
         self._call_depth = 0
@@ -70,6 +82,10 @@ class Interpreter:
 
         if input_fn is not None:
             self.global_env.set("input", input_fn)
+
+        # Store callbacks so child interpreters (imports) can inherit them
+        self._print_fn = print_fn
+        self._input_fn = input_fn
 
 
     # ── source-line helper ───────────────────────────────────────────
@@ -241,6 +257,134 @@ class Interpreter:
 
     def _visit_ContinueStmt(self, node: ast.ContinueStmt, env: Environment):
         raise ContinueSignal()
+
+    def _visit_ImportStmt(self, node: ast.ImportStmt, env: Environment):
+        """Load, lex, parse, and run an external .grav file.
+
+        Resolution order (first match wins)
+        ------------------------------------
+        1. Relative to the *importing file's own directory*  (set by CLI / GUI
+           open-file).
+        2. Relative to the current working directory  (fallback for GUI inline
+           code or scripts run from a different directory).
+        3. Relative to the GravLang project root  (the directory that contains
+           interpreter.py — useful for ``import "lib/math.grav"`` regardless
+           of where the user's script lives).
+
+        Semantics
+        ---------
+        - The imported file runs in a **fresh** Environment so its local
+          variables don't accidentally pollute the caller.
+        - Every top-level name the module defines is merged into ``env``
+          after execution, making them available to the importer.
+        - Each file is executed **at most once** per interpreter session
+          (circular imports are silently skipped after the first load).
+        """
+        from lexer import Lexer as _Lex
+        from parser import Parser as _Par
+        from grav_builtins import BUILTINS
+
+        # ── 1. Build the search path ────────────────────────────────────
+        # GravLang project root = directory that contains interpreter.py
+        _gravlang_root = os.path.dirname(os.path.abspath(__file__))
+
+        candidate_bases: list[str] = []
+        if self._current_file:
+            candidate_bases.append(os.path.dirname(self._current_file))
+        candidate_bases.append(os.getcwd())
+        if _gravlang_root not in candidate_bases:
+            candidate_bases.append(_gravlang_root)
+        # Always include GravLang root as a last-resort base (even if
+        # it equals CWD) so the "strip leading ../" fallback below is tried.
+        if _gravlang_root not in [os.path.abspath(b) for b in candidate_bases]:
+            candidate_bases.append(_gravlang_root)
+
+        # Deduplicate while preserving order
+        seen_norm: set[str] = set()
+        unique_bases: list[str] = []
+        for b in candidate_bases:
+            nb = os.path.normcase(os.path.abspath(b))
+            if nb not in seen_norm:
+                seen_norm.add(nb)
+                unique_bases.append(b)
+
+        # Strip leading ../ segments to build a "project-relative" fallback
+        # e.g.  "../lib/math.grav"  → "lib/math.grav"
+        parts = node.path.replace("\\", "/").split("/")
+        stripped_parts = [p for p in parts if p not in ("", "..")]
+        stripped_path = "/".join(stripped_parts)  # "" if path was all ../
+
+        def _candidates_for(base: str):
+            """Yield (path_str, file_path) pairs to try for one base."""
+            yield node.path, os.path.normpath(os.path.join(base, node.path))
+            if stripped_path and stripped_path != node.path:
+                yield stripped_path, os.path.normpath(
+                    os.path.join(base, stripped_path)
+                )
+
+        # Try each base with both the raw and stripped paths
+        abs_path: str | None = None
+        tried_all: list[str] = []
+        for base in unique_bases:
+            for _label, candidate in _candidates_for(base):
+                tried_all.append(candidate)
+                if os.path.isfile(candidate):
+                    abs_path = candidate
+                    break
+            if abs_path is not None:
+                break
+
+        if abs_path is None:
+            # De-dup for the error message (preserve order)
+            seen_t: set[str] = set()
+            unique_tried: list[str] = []
+            for p in tried_all:
+                np = os.path.normcase(p)
+                if np not in seen_t:
+                    seen_t.add(np)
+                    unique_tried.append(p)
+            raise GravLangRuntimeError(
+                f"import: file not found — {node.path!r}\n"
+                f"  Searched:\n" +
+                "\n".join(f"    {p!r}" for p in unique_tried),
+                node.line, self._get_source_line(node.line),
+            )
+
+        # ── 2. Circular / duplicate import guard ────────────────────────
+        norm_path = os.path.normcase(abs_path)
+        if norm_path in self._imported_paths:
+            return  # already loaded — skip silently
+        self._imported_paths.add(norm_path)
+
+        # ── 3. Read the module source ───────────────────────────────────
+        try:
+            with open(abs_path, "r", encoding="utf-8") as fh:
+                source = fh.read()
+        except OSError as exc:
+            raise GravLangRuntimeError(
+                f"import: cannot read {abs_path!r}: {exc}",
+                node.line, self._get_source_line(node.line),
+            )
+
+        # ── 4. Lex + parse ──────────────────────────────────────────────
+        tokens = _Lex(source).tokenize()
+        tree   = _Par(tokens).parse()
+
+        # ── 5. Run in an isolated child interpreter ─────────────────────
+        child = Interpreter(
+            source=source,
+            current_file=abs_path,
+            _imported_paths=self._imported_paths,   # shared — prevents re-import
+            print_fn=self._print_fn,
+            input_fn=self._input_fn,
+        )
+        child.interpret(tree)
+
+        # ── 6. Merge exports into caller's env ──────────────────────────
+        builtin_names = set(BUILTINS.keys())
+        for name, value in child.global_env._store.items():
+            if name not in builtin_names:   # don't clobber built-ins
+                env.set(name, value)
 
     def _visit_Block(self, node: ast.Block, env: Environment):
         block_env = Environment(parent=env)

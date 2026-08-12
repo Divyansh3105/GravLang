@@ -1,0 +1,77 @@
+# lib/math.grav — GravLang standard math library module
+
+# ── Constants ────────────────────────────────────────────────────────
+let PI  = 3.14159265358979;
+let E   = 2.71828182845905;
+
+# ── Basic math functions ─────────────────────────────────────────────
+func abs(n) {
+    if (n < 0) { return n * -1; }
+    return n;
+}
+
+func min(a, b) {
+    if (a < b) { return a; }
+    return b;
+}
+
+func max(a, b) {
+    if (a > b) { return a; }
+    return b;
+}
+
+func clamp(val, lo, hi) {
+    return max(lo, min(val, hi));
+}
+
+func sign(n) {
+    if (n > 0) { return 1; }
+    if (n < 0) { return -1; }
+    return 0;
+}
+
+# ── Power / root ─────────────────────────────────────────────────────
+func pow(base, exp) {
+    return base ** exp;
+}
+
+func sqrt(n) {
+    # Newton-Raphson approximation (10 iterations)
+    if (n < 0) { return null; }
+    if (n == 0) { return 0; }
+    let x = n / 2.0;
+    let i = 0;
+    while (i < 10) {
+        x = (x + n / x) / 2.0;
+        i += 1;
+    }
+    return x;
+}
+
+# ── Rounding ─────────────────────────────────────────────────────────
+func floor(n) {
+    let i = toInt(n);
+    if (n < 0 and toFloat(i) != n) { return i - 1; }
+    return i;
+}
+
+func ceil(n) {
+    let i = toInt(n);
+    if (n > 0 and toFloat(i) != n) { return i + 1; }
+    return i;
+}
+
+func round(n) {
+    return floor(n + 0.5);
+}
+
+# ── Factorial & Fibonacci ─────────────────────────────────────────────
+func factorial(n) {
+    if (n <= 1) { return 1; }
+    return n * factorial(n - 1);
+}
+
+func fib(n) {
+    if (n <= 1) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}

@@ -32,7 +32,7 @@ def run_file(path: str) -> None:
     try:
         tokens = Lexer(source).tokenize()
         tree   = Parser(tokens).parse()
-        interp = Interpreter(source=source)
+        interp = Interpreter(source=source, current_file=os.path.abspath(path))
         interp.interpret(tree)
     except GravLangError as e:
         print(f"❌ {e}")

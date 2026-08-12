@@ -91,6 +91,8 @@ class Parser:
             return self._break_stmt()
         if tok.type == "CONTINUE":
             return self._continue_stmt()
+        if tok.type == "IMPORT":
+            return self._import_stmt()
 
         # Expression statement (assignment or bare expression / call)
         return self._expr_statement()
@@ -239,6 +241,21 @@ class Parser:
         self._expect("CONTINUE")
         self._expect("SEMI", "Expected ';' after continue")
         return ast.ContinueStmt(line=line)
+
+    # import "path/to/module.grav" ;
+    def _import_stmt(self) -> ast.ImportStmt:
+        line = self._current().line
+        self._expect("IMPORT")
+        path_tok = self._expect("STRING", "Expected a string path after 'import'")
+        # Strip surrounding quotes and unescape, same as _atom STRING handling
+        raw = path_tok.value[1:-1]
+        raw = (raw
+               .replace("\\n", "\n")
+               .replace("\\t", "\t")
+               .replace('\\"', '"')
+               .replace("\\\\", "\\"))
+        self._expect("SEMI", "Expected ';' after import path")
+        return ast.ImportStmt(path=raw, line=line)
 
     # Helper: var decl without trailing ;
     def _var_decl_no_semi(self) -> ast.VarDecl:
