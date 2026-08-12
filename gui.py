@@ -242,6 +242,87 @@ AUG_OPS    = r'(//=|%=|\+=|-=|\*=|/=)'  # FIXED: added //= and %= for syntax hig
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  LINT TOOLTIP
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LintTooltip:
+    """Small floating label that shows an error message near the cursor.
+
+    Usage
+    -----
+    tt = LintTooltip(root, theme)
+    tt.show("Unexpected token 'x'", screen_x, screen_y)
+    tt.hide()
+    """
+
+    _DELAY_MS = 300   # ms to wait before showing (avoid flicker on fast moves)
+
+    def __init__(self, root: tk.Tk, theme: dict):
+        self._root    = root
+        self.theme    = theme
+        self._win     = None
+        self._after   = None   # pending after() id
+        self._pending: tuple[str, int, int] | None = None
+
+    def update_theme(self, theme: dict):
+        self.theme = theme
+
+    def schedule(self, message: str, sx: int, sy: int):
+        """Schedule a tooltip to appear after _DELAY_MS.  Call hide() first."""
+        self._cancel()
+        self._pending = (message, sx, sy)
+        self._after = self._root.after(self._DELAY_MS, self._show_pending)
+
+    def _show_pending(self):
+        if self._pending:
+            msg, sx, sy = self._pending
+            self._do_show(msg, sx, sy)
+
+    def _do_show(self, message: str, sx: int, sy: int):
+        self.hide()
+        t   = self.theme
+        win = tk.Toplevel(self._root)
+        win.wm_overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=t["RED"])
+        # Outer border using frame
+        frm = tk.Frame(win, bg=t["BG_CRUST"], padx=1, pady=1)
+        frm.pack(fill="both", expand=True)
+        lbl = tk.Label(
+            frm, text=message,
+            bg=t["BG_CRUST"], fg=t["RED"],
+            font=("Segoe UI", 9),
+            justify="left", anchor="w",
+            padx=8, pady=4,
+            wraplength=420,
+        )
+        lbl.pack()
+        # Position just above cursor so it never overlaps the line being read
+        win.update_idletasks()
+        h = win.winfo_reqheight()
+        win.geometry(f"+{sx + 12}+{sy - h - 6}")
+        self._win = win
+
+    def hide(self):
+        self._cancel()
+        if self._win:
+            try:
+                self._win.destroy()
+            except Exception:
+                pass
+            self._win = None
+
+    def _cancel(self):
+        if self._after:
+            try:
+                self._root.after_cancel(self._after)
+            except Exception:
+                pass
+            self._after  = None
+            self._pending = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  AUTO-COMPLETE POPUP
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -876,6 +957,14 @@ class EditorTab:
             self.editor, self.theme, on_accept=self._insert_completion
         )
 
+        # ── Linting state ────────────────────────────────────────────────────
+        self._lint_timer:  threading.Timer | None = None   # debounce handle
+        self._lint_errors: dict[int, str]         = {}     # line -> message
+        # Tooltip lives on the root window (shared across all tabs would be
+        # fine, but per-tab is simpler since each tab has its own editor)
+        _root = self._frame.winfo_toplevel()
+        self._lint_tooltip = LintTooltip(_root, self.theme)
+
         self._setup_tags()
         self._setup_bindings()
         self._update_line_numbers()
@@ -890,19 +979,27 @@ class EditorTab:
 
     def _setup_tags(self):
         t = self.theme
-        self.editor.tag_configure("keyword",   foreground=t["BLUE"])
-        self.editor.tag_configure("builtin",   foreground=t["TEAL"])
-        self.editor.tag_configure("string",    foreground=t["GREEN"])
-        self.editor.tag_configure("number",    foreground=t["MAUVE"])
-        self.editor.tag_configure("comment",   foreground=t["TEXT_SUB"])
-        self.editor.tag_configure("boolean",   foreground=t["RED"])
-        self.editor.tag_configure("self_kw",   foreground=t["LAVENDER"])
-        self.editor.tag_configure("class_nm",  foreground=t["PEACH"])
-        self.editor.tag_configure("augop",     foreground=t["MAUVE"])
-        self.editor.tag_configure("active_ln", background=t["BG_SURFACE0"])
-        self.editor.tag_configure("match_hl",  background=t["PEACH"], foreground="#1e1e2e")
-        self.editor.tag_configure("match_cur", background=t["PEACH"], foreground="#1e1e2e",
+        self.editor.tag_configure("keyword",        foreground=t["BLUE"])
+        self.editor.tag_configure("builtin",        foreground=t["TEAL"])
+        self.editor.tag_configure("string",         foreground=t["GREEN"])
+        self.editor.tag_configure("number",         foreground=t["MAUVE"])
+        self.editor.tag_configure("comment",        foreground=t["TEXT_SUB"])
+        self.editor.tag_configure("boolean",        foreground=t["RED"])
+        self.editor.tag_configure("self_kw",        foreground=t["LAVENDER"])
+        self.editor.tag_configure("class_nm",       foreground=t["PEACH"])
+        self.editor.tag_configure("augop",          foreground=t["MAUVE"])
+        self.editor.tag_configure("active_ln",      background=t["BG_SURFACE0"])
+        self.editor.tag_configure("match_hl",       background=t["PEACH"], foreground="#1e1e2e")
+        self.editor.tag_configure("match_cur",      background=t["PEACH"], foreground="#1e1e2e",
                                   font=("Consolas", 12, "bold"))
+        # Error squiggle: red underline only — text colour stays as-is
+        self.editor.tag_configure(
+            "error_squiggle",
+            underline=True,
+            underlinefg=t["RED"],   # Tk 9 / Python 3.12+ coloured underline
+        )
+        # error_squiggle must render on top of syntax tags
+        self.editor.tag_raise("error_squiggle")
 
     def _setup_bindings(self):
         ed = self.editor
@@ -920,6 +1017,8 @@ class EditorTab:
         ed.bind("<Down>",  self._ac_down)
         ed.bind("<Escape>", lambda e: self._autocomplete.hide())
         ed.bind("<Control-space>",  self._force_autocomplete)
+        ed.bind("<Motion>",         self._on_editor_motion)
+        ed.bind("<Leave>",          lambda e: self._lint_tooltip.hide())
 
     def _on_key_release(self, event):
         if event.keysym in ("Up","Down","Left","Right","Escape"):
@@ -932,6 +1031,9 @@ class EditorTab:
         self._highlight()
         self._update_line_numbers()
         self._on_cursor_move(event)
+        # Take a source snapshot on the main thread so the worker is safe
+        self._lint_source_snap = self.editor.get("1.0", "end-1c")
+        self._start_lint_timer()
 
     def _on_cursor_move(self, event=None):
         pos = self.editor.index("insert")
@@ -1051,6 +1153,94 @@ class EditorTab:
         self.editor.insert(f"{row}.end", "\n" + line)
         return "break"
 
+    # ── Real-time linting ────────────────────────────────────────────────────────────
+
+    def _start_lint_timer(self):
+        """(Re-)start the 500 ms debounce timer for background linting."""
+        if self._lint_timer:
+            self._lint_timer.cancel()
+        self._lint_timer = threading.Timer(0.5, self._run_lint)
+        self._lint_timer.daemon = True
+        self._lint_timer.start()
+
+    def _run_lint(self):
+        """Worker: run Lexer + Parser on a snapshot of the current source.
+
+        Runs in a daemon thread.  Results are posted to the main thread via
+        root.after() so we never touch tk widgets from a worker thread.
+        """
+        try:
+            source = self._lint_source_snap  # snapshot captured on main thread
+        except AttributeError:
+            return
+
+        error_line   = None
+        error_msg    = ""
+
+        if not HAS_GRAVLANG:
+            # No runtime available: post empty results
+            self._schedule_lint_apply(None, "")
+            return
+
+        try:
+            tokens = Lexer(source).tokenize()
+            Parser(tokens).parse()
+        except Exception as exc:
+            # Both LexerError and ParseError carry a .line attribute
+            error_line = getattr(exc, "line", None)
+            error_msg  = getattr(exc, "message", str(exc))
+
+        self._schedule_lint_apply(error_line, error_msg)
+
+    def _schedule_lint_apply(self, error_line, error_msg):
+        """Post lint results back to the main thread."""
+        try:
+            # self.editor.winfo_exists() would need main thread; use tk's after()
+            self.editor.after(0, lambda: self._apply_lint_results(error_line, error_msg))
+        except Exception:
+            pass
+
+    def _apply_lint_results(self, error_line: int | None, error_msg: str):
+        """(Main thread) Update the error_squiggle tag and store the error map."""
+        ed = self.editor
+        ed.tag_remove("error_squiggle", "1.0", "end")
+        self._lint_errors.clear()
+
+        if error_line and error_line >= 1:
+            # Mark the entire offending line
+            line_start = f"{error_line}.0"
+            line_end   = f"{error_line}.end"
+            content    = ed.get(line_start, line_end)
+            # If line is blank, mark at least one space so the tag is visible
+            if not content.strip():
+                line_end = f"{error_line}.0+1c"
+            ed.tag_add("error_squiggle", line_start, line_end)
+            # Keep the tag raised above syntax highlighting
+            try:
+                ed.tag_raise("error_squiggle")
+            except Exception:
+                pass
+            self._lint_errors[error_line] = error_msg
+
+    def _on_editor_motion(self, event):
+        """Show the lint tooltip only when hovering directly over squiggled text."""
+        try:
+            idx  = self.editor.index(f"@{event.x},{event.y}")
+            tags = self.editor.tag_names(idx)
+        except Exception:
+            self._lint_tooltip.hide()
+            return
+
+        if "error_squiggle" in tags:
+            row = int(idx.split(".")[0])
+            msg = self._lint_errors.get(row, "")
+            if msg:
+                self._lint_tooltip.schedule(msg, event.x_root, event.y_root)
+        else:
+            self._lint_tooltip.hide()
+
+    # ── Syntax highlighting ─────────────────────────────────────────────────────────
+
     def _highlight(self):
         ed = self.editor
         for tag in ("keyword","builtin","string","number","comment",
@@ -1111,6 +1301,7 @@ class EditorTab:
         self.container.configure(bg=t["BG_BASE"])
         self._frame.configure(bg=t["BG_BASE"])
         self._autocomplete.update_theme(theme)  # keep popup in sync with theme
+        self._lint_tooltip.update_theme(theme)  # keep tooltip in sync with theme
         self._setup_tags()
         self._highlight()
         self._update_line_numbers()
