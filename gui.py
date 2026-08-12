@@ -244,55 +244,176 @@ AUG_OPS    = r'(//=|%=|\+=|-=|\*=|/=)'  # FIXED: added //= and %= for syntax hig
 # ─────────────────────────────────────────────────────────────────────────────
 #  AUTO-COMPLETE POPUP
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Completion entries: (display_label, bare_word, category)
+# category: "keyword" | "builtin" | "user"
+_AC_KEYWORDS = [
+    "let", "if", "elif", "else", "while", "for", "in", "func", "return",
+    "class", "extends", "true", "false", "null", "self",
+    "and", "or", "not", "break", "continue", "try", "catch", "throw",
+    "import", "finally", "new",
+]
+_AC_BUILTINS = [
+    "print", "len", "type", "push", "pop", "sort", "toString",
+    "input", "toInt", "toFloat", "hasAttr",
+    "keys", "values", "has", "del",
+    "remove", "contains", "reverse",
+]
+
+# Category icons shown as a prefix in the listbox
+_CAT_ICON = {"keyword": "⚡", "builtin": "◆", "user": "○"}
+
+
 class AutoCompletePopup:
-    COMPLETIONS = [
-        "print", "len", "type", "push", "pop", "sort", "toString",
-        "range", "input", "parseInt", "parseFloat", "append",
-        "let", "if", "else", "while", "for", "in", "func", "return",
-        "class", "extends", "true", "false", "null", "self",
-    ]
+    """Theme-aware autocomplete dropdown for the GravLang editor.
 
-    def __init__(self, editor_widget):
-        self.editor = editor_widget
-        self.popup  = None
-        self.listbox = None
+    Features
+    --------
+    * Three-tier completions: keywords  →  builtins  →  user-defined symbols.
+    * Theme colours applied at popup creation time (no hardcoded palette).
+    * Accurate screen position via Text.bbox() instead of pixel guessing.
+    * Keyboard: Up/Down to navigate, Tab/Return to accept, Escape to dismiss.
+    * Ctrl+Space to trigger manually (bound from EditorTab).
+    """
 
-    def show(self, x, y, prefix):
-        matches = [c for c in self.COMPLETIONS if c.startswith(prefix) and c != prefix]
-        if not matches:
+    def __init__(self, editor_widget: tk.Text, theme: dict, on_accept=None):
+        self.editor     = editor_widget
+        self.theme      = theme
+        self.popup      = None
+        self.listbox    = None
+        self._on_accept = on_accept  # callable(word: str) invoked when user picks an entry
+        # Internal list of bare words matching the current prefix (same order as listbox)
+        self._words: list[str] = []
+
+    # ── public API ────────────────────────────────────────────────────────────
+
+    def update_theme(self, theme: dict):
+        self.theme = theme
+
+    def show(self, prefix: str, user_symbols: list[str] | None = None):
+        """Build and display the popup below the current cursor position.
+
+        Parameters
+        ----------
+        prefix       : the partial word already typed
+        user_symbols : extra identifiers harvested from the document
+        """
+        t = self.theme
+        p = prefix.lower()
+
+        # Collect matching entries per category
+        seen: set[str] = set()
+        entries: list[tuple[str, str, str]] = []  # (label, word, category)
+
+        for word in _AC_KEYWORDS:
+            if word.lower().startswith(p) and word != prefix:
+                lbl = f"{_CAT_ICON['keyword']} {word}"
+                entries.append((lbl, word, "keyword"))
+                seen.add(word)
+
+        for word in _AC_BUILTINS:
+            if word.lower().startswith(p) and word not in seen:
+                lbl = f"{_CAT_ICON['builtin']} {word}"
+                entries.append((lbl, word, "builtin"))
+                seen.add(word)
+
+        for word in sorted(user_symbols or []):
+            if word.lower().startswith(p) and word not in seen and word != prefix:
+                lbl = f"{_CAT_ICON['user']} {word}"
+                entries.append((lbl, word, "user"))
+                seen.add(word)
+
+        if not entries:
             self.hide()
             return
+
         self.hide()
+
+        # ── Compute popup position using bbox ─────────────────────────────────
+        try:
+            bbox = self.editor.bbox("insert")
+            if bbox:
+                bx, by, _, bh = bbox
+                sx = self.editor.winfo_rootx() + bx
+                sy = self.editor.winfo_rooty() + by + bh + 2
+            else:
+                raise ValueError("no bbox")
+        except Exception:
+            sx = self.editor.winfo_rootx() + 40
+            sy = self.editor.winfo_rooty() + 40
+
+        # ── Build Toplevel ────────────────────────────────────────────────────
         self.popup = tk.Toplevel(self.editor)
         self.popup.wm_overrideredirect(True)
-        self.popup.geometry(f"+{x}+{y}")
-        self.popup.configure(bg="#313244")
+        self.popup.configure(bg=t["BG_SURFACE0"])
+
+        # Thin border frame
+        border = tk.Frame(self.popup, bg=t["BG_SURFACE1"], padx=1, pady=1)
+        border.pack(fill="both", expand=True)
+
+        self._words = [word for _, word, _ in entries]
+        labels      = [lbl  for lbl,  _, _ in entries]
+        cats        = [cat  for _,    _, cat in entries]
+
         self.listbox = tk.Listbox(
-            self.popup, bg="#313244", fg="#cdd6f4",
-            selectbackground="#89b4fa", selectforeground="#1e1e2e",
-            font=("Consolas", 11), relief="flat", borderwidth=1,
-            highlightthickness=1, highlightbackground="#45475a",
-            height=min(len(matches), 8),
+            border,
+            bg=t["BG_SURFACE0"],
+            fg=t["TEXT_MAIN"],
+            selectbackground=t["BLUE"],
+            selectforeground=t["BG_CRUST"],
+            font=("Consolas", 11),
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            height=min(len(entries), 9),
+            activestyle="none",
         )
-        self.listbox.pack()
-        for m in matches:
-            self.listbox.insert(tk.END, m)
+        self.listbox.pack(fill="both", expand=True)
+
+        # Insert items with per-category foreground colours
+        cat_colors = {
+            "keyword": t["BLUE"],
+            "builtin": t["TEAL"],
+            "user":    t["TEXT_MAIN"],
+        }
+        for lbl, cat in zip(labels, cats):
+            self.listbox.insert(tk.END, lbl)
+            tag = f"ac_{cat}"
+            self.listbox.itemconfigure(tk.END, foreground=cat_colors[cat])
+
         self.listbox.select_set(0)
-        self.listbox.bind("<Return>",  self._accept)
-        self.listbox.bind("<Tab>",     self._accept)
-        self.listbox.bind("<Escape>",  lambda e: self.hide())
+        self.listbox.bind("<Return>",   self._accept)
+        self.listbox.bind("<Tab>",      self._accept)
+        self.listbox.bind("<Escape>",   lambda e: self.hide())
         self.listbox.bind("<Double-1>", self._accept)
-        self.popup.bind("<FocusOut>", lambda e: self.hide())
+        # Keep editor focus – don't grab; just close on editor focus-out handled externally
+        self.popup.bind("<FocusOut>",  self._on_focus_out)
+
+        self.popup.geometry(f"+{sx}+{sy}")
+        self.popup.lift()
+        self.popup.attributes("-topmost", True)
+
+    def _on_focus_out(self, event):
+        # Only hide if focus moved outside of both popup and its listbox
+        try:
+            fw = self.popup.focus_get()
+            if fw and (fw == self.popup or fw == self.listbox):
+                return
+        except Exception:
+            pass
+        self.hide()
 
     def _accept(self, event=None):
         if not self.listbox: return
         sel = self.listbox.curselection()
         if not sel: return
-        word = self.listbox.get(sel[0])
-        self.editor.event_generate("<<AutoComplete>>", data=word)
-        self.hide()
+        word = self._words[sel[0]]
+        self.hide()  # hide first so the editor is clean before insertion
+        if self._on_accept:
+            self._on_accept(word)
+        return "break"
 
-    def navigate(self, direction):
+    def navigate(self, direction: int):
         if not self.listbox: return
         cur = self.listbox.curselection()
         idx = (cur[0] if cur else -1) + direction
@@ -303,11 +424,15 @@ class AutoCompletePopup:
 
     def hide(self):
         if self.popup:
-            self.popup.destroy()
-            self.popup = None
+            try:
+                self.popup.destroy()
+            except Exception:
+                pass
+            self.popup   = None
             self.listbox = None
+            self._words  = []
 
-    def visible(self):
+    def visible(self) -> bool:
         return self.popup is not None
 
 
@@ -747,8 +872,9 @@ class EditorTab:
         self.vsb.pack(side="right", fill="y")
         self.editor.pack(fill="both", expand=True, side="left")
 
-        self._autocomplete = AutoCompletePopup(self.editor)
-        self.editor.bind("<<AutoComplete>>", self._accept_autocomplete)
+        self._autocomplete = AutoCompletePopup(
+            self.editor, self.theme, on_accept=self._insert_completion
+        )
 
         self._setup_tags()
         self._setup_bindings()
@@ -793,6 +919,7 @@ class EditorTab:
         ed.bind("<Up>",    self._ac_up)
         ed.bind("<Down>",  self._ac_down)
         ed.bind("<Escape>", lambda e: self._autocomplete.hide())
+        ed.bind("<Control-space>",  self._force_autocomplete)
 
     def _on_key_release(self, event):
         if event.keysym in ("Up","Down","Left","Right","Escape"):
@@ -839,30 +966,64 @@ class EditorTab:
             self._autocomplete.navigate(1)
             return "break"
 
-    def _maybe_autocomplete(self):
-        idx = self.editor.index("insert")
-        row, col = idx.split(".")
-        line = self.editor.get(f"{row}.0", idx)
-        m = re.search(r'[a-zA-Z_]\w*$', line)
-        if m and len(m.group()) >= 2:
-            prefix = m.group()
-            x = self.editor.winfo_rootx() + int(col) * 7
-            y = self.editor.winfo_rooty() + int(row) * 18 + 24
-            self._autocomplete.show(x, y, prefix)
-        else:
-            self._autocomplete.hide()
+    # ── Autocomplete helpers ───────────────────────────────────────────────────
 
-    def _accept_autocomplete(self, event):
-        word = event.data if hasattr(event, "data") else ""
-        if not word: return
+    def _collect_user_symbols(self) -> list[str]:
+        """Scan the editor content and return user-defined identifiers.
+
+        Extracts names after ``let``, ``func``, ``class``, and plain
+        identifiers so that variables declared earlier in the file appear
+        in the completion list.
+        """
+        content = self.editor.get("1.0", "end-1c")
+        symbols: set[str] = set()
+        # Explicitly declared names
+        for m in re.finditer(r'\b(?:let|func|class)\s+([A-Za-z_]\w*)', content):
+            symbols.add(m.group(1))
+        # All identifiers ≥ 3 chars (catches method names, loop vars, etc.)
+        for m in re.finditer(r'\b([A-Za-z_][A-Za-z0-9_]{2,})\b', content):
+            word = m.group(1)
+            # Skip words already in static lists to avoid duplication
+            if word not in _AC_KEYWORDS and word not in _AC_BUILTINS:
+                symbols.add(word)
+        return sorted(symbols)
+
+    def _get_current_prefix(self) -> str:
+        """Return the identifier fragment immediately before the cursor."""
         idx  = self.editor.index("insert")
         row, col = idx.split(".")
         line = self.editor.get(f"{row}.0", idx)
-        m    = re.search(r'[a-zA-Z_]\w*$', line)
+        m = re.search(r'[A-Za-z_]\w*$', line)
+        return m.group() if m else ""
+
+    def _maybe_autocomplete(self):
+        """Auto-trigger the popup if the current prefix is ≥ 2 chars."""
+        prefix = self._get_current_prefix()
+        if len(prefix) >= 2:
+            self._autocomplete.show(prefix, self._collect_user_symbols())
+        else:
+            self._autocomplete.hide()
+
+    def _force_autocomplete(self, event=None):
+        """Ctrl+Space: show autocomplete regardless of prefix length."""
+        prefix = self._get_current_prefix()
+        self._autocomplete.show(prefix, self._collect_user_symbols())
+        return "break"
+
+    def _insert_completion(self, word: str):
+        """Insert the chosen completion word, replacing the typed prefix."""
+        if not word:
+            return
+        idx      = self.editor.index("insert")
+        row, col = idx.split(".")
+        line     = self.editor.get(f"{row}.0", idx)
+        m        = re.search(r'[A-Za-z_]\w*$', line)
         if m:
             start = f"{row}.{int(col) - len(m.group())}"
             self.editor.delete(start, idx)
         self.editor.insert("insert", word)
+        self.editor.focus_set()  # ensure editor regains focus after popup closes
+        self._highlight()
 
     def _auto_close(self, open_ch, close_ch):
         self.editor.insert("insert", open_ch + close_ch)
@@ -949,6 +1110,7 @@ class EditorTab:
         self.line_frame.configure(bg=t["BG_BASE"])
         self.container.configure(bg=t["BG_BASE"])
         self._frame.configure(bg=t["BG_BASE"])
+        self._autocomplete.update_theme(theme)  # keep popup in sync with theme
         self._setup_tags()
         self._highlight()
         self._update_line_numbers()
