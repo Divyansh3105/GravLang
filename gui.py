@@ -583,10 +583,16 @@ class FindReplaceBar(tk.Frame):
         self.theme = theme
         self.configure(bg=theme["BG_MANTLE"])
 
-    def show(self, replace=False):
-        self.pack(fill="x", side="top")
-        self.find_entry.focus_set()
-        self.find_entry.select_range(0, "end")
+    def show(self, replace: bool = False):
+        """Show the bar.  If replace=True, focus the replace entry."""
+        self.pack(fill="x", side="bottom")
+        if replace:
+            self.replace_entry.focus_set()
+            self.replace_entry.select_range(0, "end")
+        else:
+            self.find_entry.focus_set()
+            self.find_entry.select_range(0, "end")
+        self._do_find()
 
     def hide(self):
         editor = self._editor_getter()
@@ -1852,12 +1858,18 @@ class GravLangIDE:
         self._run_btn = self._run_button
 
     def _build_findbar(self):
+        # Parented to _editor_pane which is built in _build_body.
+        # We defer actual packing until _build_body has run (called after it).
+        pass
+
+    def _attach_findbar(self):
+        """Called after _editor_pane exists.  Creates the bar inside the pane."""
         t = self.theme
         self._findbar = FindReplaceBar(
-            self.root,
+            self._editor_pane,
             editor_getter=self._active_editor,
             theme=t, bg=t["BG_MANTLE"])
-        # not packed yet — shown on demand
+        # not packed yet — shown on demand via _toggle_find()
 
     def _build_body(self):
         t = self.theme
@@ -1898,7 +1910,10 @@ class GravLangIDE:
 
         # container for stacked tab frames
         self._editor_stack = tk.Frame(self._editor_pane, bg=t["BG_BASE"])
-        self._editor_stack.pack(fill="both", expand=True, side="left")
+        self._editor_stack.pack(fill="both", expand=True, side="top")
+
+        # Attach the findbar now that _editor_pane exists
+        self._attach_findbar()
 
     def _build_activity_bar(self):
         t   = self.theme
@@ -2817,10 +2832,41 @@ class GravLangIDE:
         r.bind("<Control-w>",    lambda e: self.close_tab(self._active_idx))
         r.bind("<Control-Tab>",  lambda e: self.switch_tab(
             (self._active_idx + 1) % max(1, len(self._tabs))))
-        r.bind("<Control-f>",    lambda e: self._toggle_find())
-        r.bind("<Control-h>",    lambda e: self._toggle_find())
+        r.bind("<Control-f>",    lambda e: self._toggle_find(replace=False))
+        r.bind("<Control-h>",    lambda e: self._toggle_find(replace=True))
         r.bind("<Control-l>",    lambda e: self._clear_output())
         r.bind("<Control-i>",    lambda e: self._toggle_inspector())
+
+    def _toggle_find(self, replace: bool = False):
+        """Show/hide the Find & Replace bar.
+
+        Ctrl+F  → open (or re-focus) the Find row.
+        Ctrl+H  → open the bar with focus on the Replace row.
+        Pressing the shortcut again while the bar is visible hides it.
+        """
+        fb = self._findbar
+        is_visible = fb.winfo_ismapped()
+
+        if is_visible and not replace:
+            # Already visible in find mode — toggle off
+            fb.hide()
+            # Return focus to the active editor
+            ed = self._active_editor()
+            if ed:
+                ed.focus_set()
+            return
+
+        # Pre-populate the search box with any current selection
+        ed = self._active_editor()
+        if ed:
+            try:
+                sel = ed.get("sel.first", "sel.last")
+                if sel and not sel.count("\n"):
+                    fb.find_var.set(sel)
+            except tk.TclError:
+                pass
+
+        fb.show(replace=replace)
 
     def _toggle_inspector(self):
         if self._inspector_visible:
