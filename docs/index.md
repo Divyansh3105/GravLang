@@ -35,5 +35,5 @@ python main.py hello.grav
 
 Or open the interactive GUI debugger:
 ```bash
-python gui.py
+python main.py
 ```

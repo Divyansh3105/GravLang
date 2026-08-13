@@ -102,7 +102,7 @@ def main():
         else:
             run_file(sys.argv[1])
     else:
-        from gui import launch_gui
+        from gravlang_ide import launch_gui
         launch_gui()
 
 
