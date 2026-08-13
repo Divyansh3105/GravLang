@@ -763,7 +763,7 @@ class FileExplorer(tk.Frame):
         super().__init__(parent, **kw)
         self.theme = theme
         self.open_file_cb = open_file_cb
-        self._cwd = os.path.expanduser("~")
+        self._cwd = os.getcwd()
         self._build()
         self._apply_theme(theme)
         self.refresh()
@@ -779,7 +779,7 @@ class FileExplorer(tk.Frame):
         style = ttk.Style()
         style.configure("Exp.Treeview",
             background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
-            foreground=t["TEXT_MAIN"], rowheight=22, font=("Segoe UI", 10))
+            foreground=t["TEXT_MAIN"], rowheight=28, font=("Segoe UI", 10))
         style.configure("Exp.Treeview.Heading",
             background=t["BG_MANTLE"], foreground=t["TEXT_SUB"],
             font=("Segoe UI", 9))
@@ -796,6 +796,7 @@ class FileExplorer(tk.Frame):
 
         self.tree.bind("<Double-1>",   self._on_double)
         self.tree.bind("<Button-3>",   self._on_right)
+        self.tree.bind("<<TreeviewOpen>>", self._on_tree_open)
 
         self.ctx_menu = tk.Menu(self, tearoff=0,
             bg=t["BG_SURFACE0"], fg=t["TEXT_MAIN"],
@@ -816,16 +817,47 @@ class FileExplorer(tk.Frame):
     def refresh(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
+        root_node = self.tree.insert("", "end", text=f" 🖿 {os.path.basename(self._cwd)}",
+                                  open=True, iid="__root__", values=(self._cwd,))
+        self._populate_node(root_node, self._cwd)
+
+    def _populate_node(self, parent_node, path):
+        # Remove any existing children (e.g. dummy nodes)
+        for child in self.tree.get_children(parent_node):
+            self.tree.delete(child)
         try:
-            entries = sorted(os.listdir(self._cwd))
+            entries = sorted(os.listdir(path))
         except Exception:
             return
-        folder = self.tree.insert("", "end", text=f"📁 {os.path.basename(self._cwd)}",
-                                  open=True, iid="__root__")
+            
+        dirs = []
+        files = []
         for name in entries:
-            full = os.path.join(self._cwd, name)
-            icon = "📄 " if os.path.isfile(full) else "📁 "
-            self.tree.insert(folder, "end", text=icon + name, values=(full,))
+            full = os.path.join(path, name)
+            if os.path.isdir(full):
+                dirs.append(name)
+            else:
+                files.append(name)
+                
+        for name in dirs:
+            full = os.path.join(path, name)
+            node = self.tree.insert(parent_node, "end", text=" 🖿 " + name, values=(full,))
+            # Insert a dummy child to show the expansion arrow
+            self.tree.insert(node, "end", text="dummy")
+            
+        for name in files:
+            full = os.path.join(path, name)
+            self.tree.insert(parent_node, "end", text=" 🖹 " + name, values=(full,))
+
+    def _on_tree_open(self, event):
+        node = self.tree.focus()
+        vals = self.tree.item(node, "values")
+        if vals:
+            path = vals[0]
+            if os.path.isdir(path):
+                children = self.tree.get_children(node)
+                if len(children) == 1 and self.tree.item(children[0], "text") == "dummy":
+                    self._populate_node(node, path)
 
     def _on_double(self, event):
         sel = self.tree.selection()
@@ -1773,7 +1805,7 @@ class GravLangIDE:
 
     def _build_tabbar(self):
         t   = self.theme
-        bar = tk.Frame(self.root, bg=t["BG_MANTLE"], height=36,
+        bar = tk.Frame(self.root, bg=t["BG_MANTLE"], height=42,
                        bd=0, relief="flat")
         bar.pack(fill="x", side="top")
         bar.pack_propagate(False)
@@ -1924,24 +1956,24 @@ class GravLangIDE:
     def _build_activity_bar(self):
         t   = self.theme
         bar = self._activity_bar
-        icons = [("⬜", self._toggle_sidebar, True),
-                 ("🔍", self._toggle_find, False)]
+        icons = [("🗂", self._toggle_sidebar, True),
+                 ("⌕", self._toggle_find, False)]
         self._act_btns = []
         for text, cmd, active in icons:
             btn = tk.Button(bar, text=text, command=cmd,
                 bg=t["BG_MANTLE"], fg=t["BLUE"] if active else t["TEXT_SUB"],
-                relief="flat", font=("Segoe UI", 14), padx=0, pady=6,
+                relief="flat", font=("Segoe UI", 16), padx=0, pady=8,
                 cursor="hand2", width=3, bd=0, highlightthickness=0,
                 activebackground=t["BG_SURFACE0"])
-            btn.pack(fill="x", pady=2)
+            btn.pack(fill="x", pady=4)
             self._act_btns.append(btn)
 
         # info at bottom
         info = tk.Button(bar, text="ⓘ", command=self._show_shortcuts,
             bg=t["BG_MANTLE"], fg=t["TEXT_SUB"], relief="flat",
-            font=("Segoe UI", 13), cursor="hand2", width=3, bd=0,
+            font=("Segoe UI", 14), cursor="hand2", width=3, bd=0,
             highlightthickness=0, activebackground=t["BG_SURFACE0"])
-        info.place(relx=0.5, rely=1.0, anchor="s", y=-6)
+        info.place(relx=0.5, rely=1.0, anchor="s", y=-10)
 
     def _build_bottom_pane(self):
         t = self.theme
@@ -2268,10 +2300,8 @@ class GravLangIDE:
             self._refresh_tab_labels()
             self._update_title()
             self._update_status_file()
-            self._file_explorer.set_cwd(os.path.dirname(path))
         else:
             self.new_tab(filepath=path, content=content)
-            self._file_explorer.set_cwd(os.path.dirname(path))
 
     def save_file(self):
         tab = self._active_tab()
@@ -2688,19 +2718,13 @@ class GravLangIDE:
             self.root.iconify()
 
     def _toggle_fullscreen(self):
-        """Toggle maximize / restore using geometry only — no ctypes, no glitches."""
+        """Toggle maximize / restore natively."""
         self._is_maximized = not getattr(self, "_is_maximized", False)
 
         if self._is_maximized:
-            self._prev_geometry = self.root.geometry()
-            # Get usable screen area (excludes taskbar on most systems)
-            sw = self.root.winfo_screenwidth()
-            sh = self.root.winfo_screenheight()
-            # Place at 0,0 with full screen size; taskbar sits on top naturally
-            self.root.geometry(f"{sw}x{sh}+0+0")
+            self.root.state('zoomed')
         else:
-            geo = getattr(self, "_prev_geometry", "1280x800+100+100")
-            self.root.geometry(geo)
+            self.root.state('normal')
 
         # Update button symbol  □ ↔ ❐
         if hasattr(self, "_win_btns") and len(self._win_btns) > 1:
@@ -2982,10 +3006,10 @@ def _hide_titlebar_windows(root: tk.Tk):
         WS_MINIMIZEBOX  = 0x00020000
         WS_SYSMENU      = 0x00080000
 
-        # Remove title bar / resize chrome (keep WS_MINIMIZEBOX so taskbar btn works)
+        # Remove title bar / resize chrome
         style = ctypes.windll.user32.GetWindowLongPtrW(hwnd, GWL_STYLE)
-        style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_SYSMENU)
-        style |= WS_MINIMIZEBOX          # keep so Win+D / taskbar click restores
+        style &= ~(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU)
+        style |= WS_MINIMIZEBOX | WS_MAXIMIZEBOX
         ctypes.windll.user32.SetWindowLongPtrW(hwnd, GWL_STYLE, style)
 
         # ── DWM: collapse non-client area to zero ─────────────────────────────
