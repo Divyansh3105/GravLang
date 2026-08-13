@@ -1,0 +1,470 @@
+# ── 1. Base class: Person ───────────────────────────────────────────
+class Person {
+    func init(name, age) {
+        self.name = name;
+        self.age  = age;
+    }
+    func greet() {
+        print("Hi, I am " + self.name + " (age " + toString(self.age) + ").");
+    }
+    func describe() {
+        return self.name + ", age " + toString(self.age);
+    }
+}
+
+# ── 2. Student extends Person ───────────────────────────────────────
+class Student extends Person {
+    func init(name, age, id) {
+        self.name   = name;
+        self.age    = age;
+        self.id     = id;
+        self.scores = [];
+        self.grade  = "N/A";
+    }
+
+    func addScore(score) {
+        if (score < 0 or score > 100) {
+            print("  [WARN] Score " + toString(score) + " out of range for " + self.name + " — skipped.");
+            return;
+        }
+        push(self.scores, score);
+    }
+
+    func average() {
+        let n = len(self.scores);
+        if (n == 0) { return 0.0; }
+        let total = 0;
+        for (s in self.scores) {
+            total += s;
+        }
+        return toFloat(total) / toFloat(n);
+    }
+
+    func computeGrade() {
+        let avg = self.average();
+        if (avg >= 90) {
+            self.grade = "A";
+        } elif (avg >= 80) {
+            self.grade = "B";
+        } elif (avg >= 70) {
+            self.grade = "C";
+        } elif (avg >= 60) {
+            self.grade = "D";
+        } else {
+            self.grade = "F";
+        }
+        return self.grade;
+    }
+
+    func describe() {
+        return self.name + " (ID:" + toString(self.id) + ")";
+    }
+}
+
+# ── 3. HonorsStudent extends Student ───────────────────────────────
+class HonorsStudent extends Student {
+    func init(name, age, id, thesis) {
+        self.name   = name;
+        self.age    = age;
+        self.id     = id;
+        self.scores = [];
+        self.grade  = "N/A";
+        self.thesis = thesis;
+    }
+
+    func describe() {
+        return self.name + " (ID:" + toString(self.id) + ") [Honors: \"" + self.thesis + "\"]";
+    }
+}
+
+# ── 4. Gradebook class ──────────────────────────────────────────────
+class Gradebook {
+    func init(course) {
+        self.course   = course;
+        self.students = [];
+    }
+
+    func enroll(student) {
+        push(self.students, student);
+    }
+
+    func size() {
+        return len(self.students);
+    }
+
+    func allAverages() {
+        let avgs = [];
+        for (s in self.students) {
+            push(avgs, s.average());
+        }
+        return avgs;
+    }
+
+    func classMean() {
+        let avgs = self.allAverages();
+        let n    = len(avgs);
+        if (n == 0) { return 0.0; }
+        let total = 0.0;
+        for (a in avgs) {
+            total += a;
+        }
+        return total / toFloat(n);
+    }
+
+    func classVariance() {
+        let avgs = self.allAverages();
+        let n    = len(avgs);
+        if (n == 0) { return 0.0; }
+        let mean  = self.classMean();
+        let sumSq = 0.0;
+        for (a in avgs) {
+            let diff = a - mean;
+            sumSq += diff ** 2;
+        }
+        return sumSq / toFloat(n);
+    }
+
+    func gradeDistribution() {
+        let dist = [0, 0, 0, 0, 0];
+        for (s in self.students) {
+            s.computeGrade();
+            if (s.grade == "A")   { dist[0] += 1; }
+            elif (s.grade == "B") { dist[1] += 1; }
+            elif (s.grade == "C") { dist[2] += 1; }
+            elif (s.grade == "D") { dist[3] += 1; }
+            else                  { dist[4] += 1; }
+        }
+        return dist;
+    }
+
+    func findById(id) {
+        for (s in self.students) {
+            if (s.id == id) { return s; }
+        }
+        return null;
+    }
+
+    func topStudents(n) {
+        let avgs = self.allAverages();
+        let stus = [];
+        for (s in self.students) { push(stus, s); }
+
+        # Bubble sort descending
+        let swapped = true;
+        while (swapped) {
+            swapped = false;
+            let i = 0;
+            while (i < len(avgs) - 1) {
+                if (avgs[i] < avgs[i + 1]) {
+                    let tmpA    = avgs[i];
+                    avgs[i]     = avgs[i + 1];
+                    avgs[i + 1] = tmpA;
+                    let tmpS    = stus[i];
+                    stus[i]     = stus[i + 1];
+                    stus[i + 1] = tmpS;
+                    swapped     = true;
+                }
+                i += 1;
+            }
+        }
+
+        let result = [];
+        let k = 0;
+        while (k < n and k < len(stus)) {
+            push(result, stus[k]);
+            k += 1;
+        }
+        return result;
+    }
+}
+
+# ── 5. Helpers ──────────────────────────────────────────────────────
+func repeatChar(ch, n) {
+    let s = "";
+    let i = 0;
+    while (i < n) {
+        s += ch;
+        i += 1;
+    }
+    return s;
+}
+
+func padLeft(val, width) {
+    let s   = toString(val);
+    let pad = width - len(s);
+    if (pad < 0) { pad = 0; }
+    return repeatChar(" ", pad) + s;
+}
+
+func bar(count, total) {
+    if (total == 0) { return ""; }
+    let pct  = (count * 100) // total;
+    let bars = pct // 5;
+    return repeatChar("#", bars) + " " + toString(pct) + "%";
+}
+
+# ── 6. Recursion: nth Fibonacci ────────────────────────────────────
+func fib(n) {
+    if (n <= 1) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+# ── 7. Recursion: binary search ────────────────────────────────────
+func bsearch(arr, target, lo, hi) {
+    if (lo > hi) { return -1; }
+    let mid = (lo + hi) // 2;
+    if (arr[mid] == target) { return mid; }
+    if (arr[mid] < target)  { return bsearch(arr, target, mid + 1, hi); }
+    return bsearch(arr, target, lo, mid - 1);
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# MAIN PROGRAM  (interactive — all data read from user via input())
+# ═══════════════════════════════════════════════════════════════════
+
+print(repeatChar("=", 60));
+print("  GravLang Grade Analyzer  (interactive mode)");
+print(repeatChar("=", 60));
+print("");
+
+# ── Course name ───────────────────────────────────────────────────
+let courseName = input("Course name: ");
+let book = Gradebook(courseName);
+
+# ── Number of students ────────────────────────────────────────────
+let numStudentsStr = input("How many students? ");
+let numStudents    = toInt(numStudentsStr);
+
+if (numStudents < 1) {
+    print("Need at least 1 student. Exiting.");
+}
+
+# ── Number of exams ───────────────────────────────────────────────
+let numExamsStr = input("How many exam scores per student? ");
+let numExams    = toInt(numExamsStr);
+
+if (numExams < 1) {
+    print("Need at least 1 exam. Exiting.");
+}
+
+# ── Enroll each student ───────────────────────────────────────────
+print("");
+print("--- Enter Student Details ---");
+
+let si = 1;
+while (si <= numStudents) {
+    print("");
+    print("  [ Student " + toString(si) + " of " + toString(numStudents) + " ]");
+
+    let sName = input("    Name       : ");
+    let sAgeS = input("    Age        : ");
+    let sAge  = toInt(sAgeS);
+    let sIdS  = input("    Student ID : ");
+    let sId   = toInt(sIdS);
+    let sType = input("    Type (S=standard / H=honors): ");
+
+    let stu = null;
+
+    if (sType == "H" or sType == "h") {
+        let thesis = input("    Thesis title: ");
+        stu = HonorsStudent(sName, sAge, sId, thesis);
+    } else {
+        stu = Student(sName, sAge, sId);
+    }
+
+    # Enter exam scores
+    let ei = 1;
+    while (ei <= numExams) {
+        let scorePrompt = "    Exam " + toString(ei) + " score : ";
+        let scoreStr    = input(scorePrompt);
+        let score       = toInt(scoreStr);
+        stu.addScore(score);
+        ei += 1;
+    }
+
+    book.enroll(stu);
+    si += 1;
+}
+
+# ── Student introductions ────────────────────────────────────────
+print("");
+print("--- Student Introductions ---");
+for (s in book.students) {
+    s.greet();
+}
+
+# ── Individual score report ──────────────────────────────────────
+print("");
+print("--- Individual Score Report ---");
+print(repeatChar("-", 60));
+
+for (s in book.students) {
+    s.computeGrade();
+    let avg = s.average();
+
+    let scoreStr = "[";
+    let first = true;
+    for (sc in s.scores) {
+        if (not first) { scoreStr += ", "; }
+        scoreStr += toString(sc);
+        first = false;
+    }
+    scoreStr += "]";
+
+    let namePad = s.name;
+    while (len(namePad) < 10) { namePad += " "; }
+
+    let avgInt  = toInt(avg);
+    let avgFrac = toInt((avg - toFloat(avgInt)) * 10.0);
+    let avgStr  = toString(avgInt) + "." + toString(avgFrac);
+
+    print(padLeft(s.id, 5) + "  " + namePad + "  " + scoreStr + "   avg=" + avgStr + "  " + s.grade);
+}
+print(repeatChar("-", 60));
+
+# ── Class statistics ─────────────────────────────────────────────
+let mean = book.classMean();
+let vari = book.classVariance();
+
+let meanInt  = toInt(mean);
+let meanFrac = toInt((mean - toFloat(meanInt)) * 100.0);
+let variInt  = toInt(vari);
+let variFrac = toInt((vari - toFloat(variInt)) * 10.0);
+
+print("");
+print("--- Class Statistics: " + book.course + " ---");
+print("  Enrolled  : " + toString(book.size()) + " students");
+print("  Class mean: " + toString(meanInt) + "." + toString(meanFrac));
+print("  Variance  : " + toString(variInt) + "." + toString(variFrac));
+
+# ── Grade distribution bar chart ─────────────────────────────────
+let dist   = book.gradeDistribution();
+let total  = book.size();
+let grades = ["A", "B", "C", "D", "F"];
+
+print("");
+print("--- Grade Distribution ---");
+let gi = 0;
+for (g in grades) {
+    let cnt  = dist[gi];
+    let bStr = bar(cnt, total);
+    print("  " + g + " | " + bStr + " (" + toString(cnt) + ")");
+    gi += 1;
+}
+
+# ── Top-3 students ───────────────────────────────────────────────
+print("");
+print("--- Top 3 Students (Bubble Sort) ---");
+let topList = book.topStudents(3);
+let rank    = 1;
+for (s in topList) {
+    let avg     = s.average();
+    let avgIntT = toInt(avg);
+    let avgFraT = toInt((avg - toFloat(avgIntT)) * 10.0);
+    print("  #" + toString(rank) + "  " + s.describe() + "  avg=" + toString(avgIntT) + "." + toString(avgFraT));
+    rank += 1;
+}
+
+# ── Find by ID (interactive) ─────────────────────────────────────
+print("");
+print("--- Lookup by ID ---");
+let lookupStr = input("  Enter a Student ID to look up: ");
+let lookupId  = toInt(lookupStr);
+let found     = book.findById(lookupId);
+if (found != null) {
+    print("  Found  : " + found.describe() + "  Grade=" + found.grade);
+} else {
+    print("  ID " + toString(lookupId) + ": not enrolled.");
+}
+
+# ── Fibonacci (recursive) ────────────────────────────────────────
+print("");
+print("--- Fibonacci (recursive) ---");
+let fibLine = "  ";
+let fi = 0;
+while (fi < 10) {
+    fibLine += toString(fib(fi));
+    if (fi < 9) { fibLine += ", "; }
+    fi += 1;
+}
+print(fibLine);
+
+# ── Binary search ────────────────────────────────────────────────
+print("");
+print("--- Binary Search ---");
+let allScores = [];
+for (s in book.students) {
+    for (sc in s.scores) {
+        push(allScores, sc);
+    }
+}
+sort(allScores);
+print("  Sorted : " + toString(allScores));
+
+let targetStr = input("  Search for score: ");
+let target    = toInt(targetStr);
+let idx       = bsearch(allScores, target, 0, len(allScores) - 1);
+if (idx >= 0) {
+    print("  Score " + toString(target) + " found at index " + toString(idx) + ".");
+} else {
+    print("  Score " + toString(target) + " not in the class.");
+}
+
+# ── Array operations: slice, reverse, pop ────────────────────────
+print("");
+print("--- Array Slice / Reverse / Pop ---");
+let sample = allScores[3:8];
+print("  Slice [3:8]  : " + toString(sample));
+reverse(sample);
+print("  After reverse: " + toString(sample));
+let popped = pop(sample);
+print("  Popped       : " + toString(popped));
+print("  Remaining    : " + toString(sample));
+
+# ── Augmented assignment + modulo ────────────────────────────────
+print("");
+print("--- Augmented Assignment & Modulo ---");
+let x = 100;
+x -= 13;
+x *= 2;
+x //= 3;
+let remainder = x % 7;
+print("  ((100-13)*2)//3 = " + toString(x));
+print("  " + toString(x) + " mod 7 = " + toString(remainder));
+
+# ── Power operator ───────────────────────────────────────────────
+print("");
+print("--- Power Operator ---");
+let bases = [2, 3, 4, 5];
+for (b in bases) {
+    print("  " + toString(b) + "^10 = " + toString(b ** 10));
+}
+
+# ── String indexing ──────────────────────────────────────────────
+print("");
+print("--- String Indexing ---");
+let word   = "GravLang";
+let ci     = 0;
+let spaced = "";
+while (ci < len(word)) {
+    if (ci > 0) { spaced += " "; }
+    spaced += word[ci];
+    ci += 1;
+}
+print("  Spell-out: " + spaced);
+
+# ── Contains & remove ────────────────────────────────────────────
+print("");
+print("--- Contains & Remove ---");
+let tags = ["data", "recursion", "OOP", "arrays", "classes"];
+print("  Tags             : " + toString(tags));
+print("  contains('OOP')  : " + toString(contains(tags, "OOP")));
+print("  contains('x')    : " + toString(contains(tags, "x")));
+remove(tags, 2);
+print("  After remove[2]  : " + toString(tags));
+
+# ── Done ─────────────────────────────────────────────────────────
+print("");
+print(repeatChar("=", 60));
+print("  Demo complete. GravLang is ready for real work.");
+print(repeatChar("=", 60));

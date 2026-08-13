@@ -1,0 +1,119 @@
+class TodoItem {
+    func init(id, title) {
+        self.id = id;
+        self.title = title;
+        self.completed = false;
+    }
+
+    func toggle() {
+        self.completed = not self.completed;
+    }
+
+    func display() {
+        let status = "[ ]";
+        if (self.completed) {
+            status = "[x]";
+        }
+        return toString(self.id) + ". " + status + " " + self.title;
+    }
+}
+
+class TodoApp {
+    func init() {
+        self.todos = [];
+        self.nextId = 1;
+    }
+
+    func add(title) {
+        let item = TodoItem(self.nextId, title);
+        push(self.todos, item);
+        self.nextId += 1;
+        print("Task added successfully!");
+    }
+
+    func listAll() {
+        print("=== Your Tasks ===");
+        if (len(self.todos) == 0) {
+            print("No tasks found. Add some!");
+            return;
+        }
+        for (item in self.todos) {
+            print(item.display());
+        }
+    }
+
+    func getTask(id) {
+        for (item in self.todos) {
+            if (item.id == id) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    func complete(id) {
+        let task = self.getTask(id);
+        if (task != null) {
+            task.completed = true;
+            print("Task marked as completed!");
+        } else {
+            print("Task ID not found.");
+        }
+    }
+
+    func delete(id) {
+        let index = -1;
+        let curr = 0;
+        for (item in self.todos) {
+            if (item.id == id) {
+                index = curr;
+                break;
+            }
+            curr += 1;
+        }
+
+        if (index != -1) {
+            remove(self.todos, index);
+            print("Task deleted!");
+        } else {
+            print("Task ID not found.");
+        }
+    }
+
+    func run() {
+        print("Welcome to GravLang Todo App!");
+        while (true) {
+            print("\nOptions: 1. Add | 2. List | 3. Complete | 4. Delete | 5. Exit");
+            let choice = input("> ");
+
+            if (choice == "1") {
+                let title = input("Enter task description: ");
+                self.add(title);
+            } elif (choice == "2") {
+                self.listAll();
+            } elif (choice == "3") {
+                let idStr = input("Enter task ID to complete: ");
+                try {
+                    self.complete(toInt(idStr));
+                } catch (err) {
+                    print("Invalid ID.");
+                }
+            } elif (choice == "4") {
+                let idStr = input("Enter task ID to delete: ");
+                try {
+                    self.delete(toInt(idStr));
+                } catch (err) {
+                    print("Invalid ID.");
+                }
+            } elif (choice == "5") {
+                print("Goodbye!");
+                break;
+            } else {
+                print("Invalid choice, try again.");
+            }
+        }
+    }
+}
+
+let app = TodoApp();
+app.run();

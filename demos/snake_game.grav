@@ -1,0 +1,117 @@
+# A turn-based text Snake game in GravLang
+
+class SnakeGame {
+    func init(width, height) {
+        self.width = width;
+        self.height = height;
+        
+        # Initial snake position (middle of grid)
+        self.snake = [
+            {"x": width // 2, "y": height // 2},
+            {"x": (width // 2) - 1, "y": height // 2}
+        ];
+        self.apple = {"x": 2, "y": 2};
+        self.gameOver = false;
+        self.score = 0;
+    }
+
+    func render() {
+        # Clear screen hack (print newlines)
+        for (let i = 0; i < 20; i += 1) { print(""); }
+
+        print("Score: " + toString(self.score));
+        
+        for (let y = 0; y < self.height; y += 1) {
+            let rowStr = "";
+            for (let x = 0; x < self.width; x += 1) {
+                # Check snake
+                let isSnake = false;
+                let isHead = false;
+                
+                let idx = 0;
+                for (part in self.snake) {
+                    if (part["x"] == x and part["y"] == y) {
+                        isSnake = true;
+                        if (idx == 0) { isHead = true; }
+                    }
+                    idx += 1;
+                }
+
+                if (isHead) {
+                    rowStr += "@";
+                } elif (isSnake) {
+                    rowStr += "O";
+                } elif (self.apple["x"] == x and self.apple["y"] == y) {
+                    rowStr += "*";
+                } else {
+                    rowStr += ".";
+                }
+            }
+            print(rowStr);
+        }
+    }
+
+    func step(direction) {
+        let head = self.snake[0];
+        let nx = head["x"];
+        let ny = head["y"];
+
+        if (direction == "w") { ny -= 1; }
+        elif (direction == "s") { ny += 1; }
+        elif (direction == "a") { nx -= 1; }
+        elif (direction == "d") { nx += 1; }
+        else { return; } # Invalid direction, skip turn
+
+        # Check walls
+        if (nx < 0 or nx >= self.width or ny < 0 or ny >= self.height) {
+            self.gameOver = true;
+            return;
+        }
+
+        # Check self collision
+        for (part in self.snake) {
+            if (part["x"] == nx and part["y"] == ny) {
+                self.gameOver = true;
+                return;
+            }
+        }
+
+        # Move head
+        let newHead = {"x": nx, "y": ny};
+        let newSnake = [newHead];
+        for (part in self.snake) {
+            push(newSnake, part);
+        }
+        self.snake = newSnake;
+
+        # Check apple
+        if (nx == self.apple["x"] and ny == self.apple["y"]) {
+            self.score += 10;
+            # Simple pseudo-random apple placement logic based on score
+            self.apple["x"] = (nx * 3 + 7) % self.width;
+            self.apple["y"] = (ny * 5 + 11) % self.height;
+        } else {
+            # Remove tail
+            pop(self.snake);
+        }
+    }
+
+    func run() {
+        print("Welcome to GravLang Snake!");
+        print("Controls: w (up), a (left), s (down), d (right). Press enter to step.");
+        input("Press enter to start...");
+        
+        while (not self.gameOver) {
+            self.render();
+            let move = input("Move (w/a/s/d): ");
+            if (len(move) > 0) {
+                self.step(move);
+            }
+        }
+        
+        print("Game Over! Final Score: " + toString(self.score));
+    }
+}
+
+let game = SnakeGame(15, 10);
+game.run();
