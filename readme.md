@@ -19,17 +19,13 @@ Whether you execute it headlessly or via its built-in interactive GUI IDE, GravL
 ## 📑 Table of Contents
 
 - [✨ Key Features](#-key-features)
+- [📖 Documentation](#-documentation)
 - [🚀 Getting Started](#-getting-started)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [💻 Usage](#-usage)
   - [Interactive GUI IDE](#interactive-gui-ide)
   - [Headless Execution](#headless-execution)
-- [📖 Language Tour](#-language-tour)
-  - [Variables & Types](#variables--types)
-  - [Control Flow](#control-flow)
-  - [Functions & Arrays](#functions--arrays)
-  - [Object-Oriented Programming](#object-oriented-programming)
 - [🧩 Architecture](#-architecture)
 - [📜 License](#-license)
 
@@ -44,6 +40,18 @@ Whether you execute it headlessly or via its built-in interactive GUI IDE, GravL
 - **First-class Functions:** Supports recursion and intuitive parameter passing.
 - **Object-Oriented Core:** Natively supports classes, inheritance (`extends`), constructors (`init`), methods, and instance properties (`self`).
 - **Comprehensive Test Suite:** Packed with an extensive `sample.grav` script that tests all language features.
+
+---
+
+## 📖 Documentation
+
+The complete language specification, syntax guide, and built-in function reference is available on our **[Documentation Site](https://yourusername.github.io/GravLang/)** (generated via MkDocs).
+
+To run the documentation locally:
+```bash
+pip install mkdocs-material
+mkdocs serve
+```
 
 ---
 
@@ -86,93 +94,6 @@ Execute a `.grav` source file directly from your terminal. Ideal for automation 
 
 ```bash
 python main.py sample.grav
-```
-
----
-
-## 📖 Language Tour
-
-Here is a quick overview of GravLang's expressive syntax.
-
-### Variables & Types
-
-GravLang uses `let` for variable declarations and supports native integers, floats, strings, booleans, and null types.
-
-```javascript
-let title = "GravLang";
-let pi = 3.14159;
-let isActive = true;
-let emptyState = null;
-
-print(title + " version: " + toString(pi));
-```
-
-### Control Flow
-
-Standard conditional structures and augmented assignments (`+=`, `-=`, `*=`).
-
-```javascript
-let score = 85;
-
-if (score >= 90) {
-    print("Grade: A");
-} elif (score >= 80) {
-    print("Grade: B");
-} else {
-    print("Needs Improvement");
-}
-```
-
-### Functions & Arrays
-
-Functions are highly capable and support recursive calls. Arrays support powerful built-in mutation.
-
-```javascript
-# Factorial Function
-func factorial(n) {
-    if (n <= 1) { return 1; }
-    return n * factorial(n - 1);
-}
-print(factorial(5)); # 120
-
-# Array Iteration
-let colors = ["red", "green", "blue"];
-push(colors, "yellow");
-
-for (color in colors) {
-    print("Color found: " + color);
-}
-```
-
-### Object-Oriented Programming
-
-Create elegant architectures using classes, instances, and inheritance.
-
-```javascript
-class Animal {
-    func init(name, sound) {
-        self.name = name;
-        self.sound = sound;
-    }
-    func speak() {
-        print(self.name + " says: " + self.sound);
-    }
-}
-
-class Dog extends Animal {
-    func init(name) {
-        self.name = name;
-        self.sound = "Woof!";
-        self.tricks = [];
-    }
-    func learnTrick(trick) {
-        push(self.tricks, trick);
-    }
-}
-
-let dog = Dog("Buddy");
-dog.speak();          # Buddy says: Woof!
-dog.learnTrick("Sit");
 ```
 
 ---

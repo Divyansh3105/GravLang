@@ -1,0 +1,29 @@
+site_name: GravLang
+site_url: https://yourusername.github.io/GravLang/
+
+theme:
+  name: material
+  palette:
+    scheme: default
+    primary: indigo
+    accent: indigo
+
+nav:
+  - Home: index.md
+  - Syntax & Types: syntax.md
+  - Control Flow: control_flow.md
+  - Functions: functions.md
+  - Data Structures: data_structures.md
+  - Classes & OOP: classes.md
+  - Built-in Functions: builtins.md
+  - Keywords & Operators: keywords_and_operators.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
