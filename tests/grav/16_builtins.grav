@@ -1,0 +1,15 @@
+print(toString(42));
+print(toString(3.14));
+print(toString(true));
+print(toString(false));
+print(toString(null));
+print(toString([1, 2, 3]));
+print(toInt("123"));
+print(toFloat("3.14"));
+print(type(42));
+print(type(3.14));
+print(type("hello"));
+print(type(true));
+print(type(null));
+print(type([1, 2]));
+print(type({"a": 1}));
