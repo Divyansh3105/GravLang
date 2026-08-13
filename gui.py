@@ -1816,6 +1816,7 @@ class GravLangIDE:
         sep()
         btn("📂 Open",  self.open_file)
         btn("💾 Save",  self.save_file)
+        btn("🪄 Format", self.format_code)
         sep()
         # Compiler Stages button
         stg_btn = tk.Button(bar, text="⚙ Stages", command=self._open_stages,
@@ -2284,6 +2285,20 @@ class GravLangIDE:
             self._update_title()
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+    def format_code(self):
+        tab = self._active_tab()
+        if not tab: return
+        code = tab.get_content()
+        try:
+            from formatter import format_source
+            formatted = format_source(code)
+            if formatted != code:
+                tab.set_content(formatted)
+                tab.modified = True
+                self._update_title()
+        except Exception as e:
+            self._append_output(f"❌ Formatter Error: {e}\n", "error")
 
     # ── RUN ───────────────────────────────────────────────────────────────────
 
