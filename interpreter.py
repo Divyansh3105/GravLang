@@ -54,7 +54,8 @@ class Interpreter:
     """Tree-walk interpreter for GravLang ASTs."""
 
     def __init__(self, *, print_fn=None, input_fn=None, source: str = "",
-                 current_file: str = "", _imported_paths: set | None = None):
+                 current_file: str = "", _imported_paths: set | None = None,
+                 on_step=None):
         """
         Parameters
         ----------
@@ -95,7 +96,7 @@ class Interpreter:
         # Store callbacks so child interpreters (imports) can inherit them
         self._print_fn = print_fn
         self._input_fn = input_fn
-
+        self._on_step = on_step
 
     # ── source-line helper ───────────────────────────────────────────
 
@@ -114,6 +115,16 @@ class Interpreter:
     # ── dispatch ─────────────────────────────────────────────────────
 
     def _exec(self, node, env: Environment):
+        if self._on_step and getattr(node, 'line', None):
+            if type(node).__name__ in {
+                "VarDecl", "Assign", "AugAssign", "IfStmt", "WhileStmt", 
+                "ForStmt", "ForInStmt", "FuncDecl", "ClassDecl", 
+                "ReturnStmt", "BreakStmt", "ContinueStmt", "ImportStmt", 
+                "TryCatchStmt", "ThrowStmt", "FuncCall", "MethodCall",
+                "ArrayAssign", "DictAssign", "AttributeSet"
+            }:
+                self._on_step(node.line, env)
+
         method_name = f"_visit_{type(node).__name__}"
         visitor = getattr(self, method_name, None)
         if visitor is None:

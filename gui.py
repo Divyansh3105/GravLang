@@ -27,7 +27,7 @@ except ImportError:
         _store = {}
 
     class Interpreter:
-        def __init__(self, print_fn=None, input_fn=None, source=""):
+        def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
             self.global_env = _FakeEnv()
             self._print_fn = print_fn or print
 
@@ -995,6 +995,7 @@ class EditorTab:
         self.editor.tag_configure("class_nm",       foreground=t["PEACH"])
         self.editor.tag_configure("augop",          foreground=t["MAUVE"])
         self.editor.tag_configure("active_ln",      background=t["BG_SURFACE0"])
+        self.editor.tag_configure("step_highlight", background=t["LAVENDER"], foreground=t["BG_BASE"])
         self.editor.tag_configure("match_hl",       background=t["PEACH"], foreground="#1e1e2e")
         self.editor.tag_configure("match_cur",      background=t["PEACH"], foreground="#1e1e2e",
                                   font=("Consolas", 12, "bold"))
@@ -1677,6 +1678,9 @@ class GravLangIDE:
         self._cancel_flag  = False        # FIXED: cancel flag for Stop button
         self._run_thread   = None         # FIXED: track background run thread
         self._stages_win: CompilerStagesWindow | None = None
+        self._is_stepping  = False
+        self._step_event   = threading.Event()
+        self._last_paused_line = -1
 
         self.root.configure(bg=self.theme["BG_BASE"])
         self._build_ui()
@@ -1813,6 +1817,7 @@ class GravLangIDE:
                 side="left", padx=4, pady=8)
 
         self._run_button = btn("▶  Run", self.run_code, accent=True)
+        self._step_button = btn("👣 Step", self.step_code)
         sep()
         btn("📂 Open",  self.open_file)
         btn("💾 Save",  self.save_file)
@@ -2302,10 +2307,25 @@ class GravLangIDE:
 
     # ── RUN ───────────────────────────────────────────────────────────────────
 
-    def run_code(self):
+    def step_code(self):
+        if getattr(self, "_is_running", False):
+            self._is_stepping = True
+            self._step_event.set()
+        else:
+            self.run_code(is_stepping=True)
+
+    def run_code(self, is_stepping=False):
         tab = self._active_tab()
         if not tab: return
         code = tab.get_content()
+
+        if getattr(self, "_is_running", False):
+            self._is_stepping = False
+            self._step_event.set()
+            return
+            
+        self._is_stepping = is_stepping
+        self._last_paused_line = -1
 
         # Clear output before run if the toggle is enabled
         if getattr(self, "_clear_on_run", None) and self._clear_on_run.get():
@@ -2314,9 +2334,6 @@ class GravLangIDE:
         ts = datetime.now().strftime("%H:%M:%S")
         self._append_output(f"── Run at {ts} {'─'*30}\n", "sep")
         self._set_status_running()
-        # Guard: don't start a second run if one is already running
-        if getattr(self, "_is_running", False):
-            return
         self._is_running = True
         self._cancel_flag = False
         self.root.update_idletasks()   # flush the UI so "Running…" shows up
@@ -2416,6 +2433,33 @@ class GravLangIDE:
                 import ast_nodes as _an
                 import dataclasses
 
+                def _on_step_hook(line, env):
+                    if not getattr(self, "_is_stepping", False):
+                        return
+                    if line == self._last_paused_line:
+                        return
+                    if self._cancel_flag:
+                        from errors import GravLangError
+                        raise GravLangError("Execution stopped")
+                    
+                    self._last_paused_line = line
+                    store = dict(env._store)
+                    
+                    def _update_ui():
+                        self._inspector.populate(store)
+                        tab = self._active_tab()
+                        if tab:
+                            tab.editor.tag_remove("step_highlight", "1.0", "end")
+                            tab.editor.tag_add("step_highlight", f"{line}.0", f"{line}.end")
+                            tab.editor.see(f"{line}.0")
+                    
+                    self.root.after(0, _update_ui)
+                    self._step_event.clear()
+                    self._step_event.wait()
+                    if self._cancel_flag:
+                        from errors import GravLangError
+                        raise GravLangError("Execution stopped")
+
                 if stages_ref:
                     # Wrap Interpreter to intercept variable declarations/assignments
                     orig_visit_VarDecl   = None
@@ -2423,7 +2467,7 @@ class GravLangIDE:
                     orig_visit_AugAssign = None
                     orig_call            = None
 
-                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code)
+                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code, on_step=_on_step_hook)
 
                     _orig_vd  = interp._visit_VarDecl
                     _orig_as  = interp._visit_Assign
@@ -2485,7 +2529,7 @@ class GravLangIDE:
                     # Note: we skip wrapping FuncCall as it would double-eval args
 
                 else:
-                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code)
+                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code, on_step=_on_step_hook)
 
                 interp.interpret(ast_tree)
                 elapsed = time.time() - t_start
@@ -2533,6 +2577,7 @@ class GravLangIDE:
     def _stop_code(self):
         """Signal the running thread to stop; show cancellation message."""
         self._cancel_flag = True
+        self._step_event.set()
         if hasattr(self, "_input_bar"):
             self.root.after(0, lambda: self._input_bar.pack_forget())
         if getattr(self, "_active_input_event", None):
@@ -2541,6 +2586,9 @@ class GravLangIDE:
 
     def _finish_run(self, lines, errors, elapsed, store):
         self._is_running = False  # clear running guard
+        tab = self._active_tab()
+        if tab:
+            tab.editor.tag_remove("step_highlight", "1.0", "end")
         # NOTE: lines already streamed live by capture(); no need to replay them.
         for err in errors:
             self._append_output(f"❌ {err}\n", "error")
