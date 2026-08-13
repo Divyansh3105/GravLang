@@ -1,0 +1,142 @@
+# std.grav - GravLang Standard Library
+
+# ==========================================
+# Math Class
+# ==========================================
+class MathLib {
+    func abs(x) {
+        if (x < 0) { return -x; }
+        return x;
+    }
+
+    func min(a, b) {
+        if (a < b) { return a; }
+        return b;
+    }
+
+    func max(a, b) {
+        if (a > b) { return a; }
+        return b;
+    }
+
+    func floor(x) {
+        let i = toInt(x);
+        if (x < 0 and x != i) {
+            return i - 1;
+        }
+        return i;
+    }
+
+    func pow(base, exp) {
+        return base ** exp;
+    }
+
+    func sqrt(n) {
+        if (n < 0) { return null; }
+        if (n == 0) { return 0; }
+        let guess = n / 2.0;
+        let prev = 0.0;
+        while (self.abs(guess - prev) > 0.000001) {
+            prev = guess;
+            guess = (guess + n / guess) / 2.0;
+        }
+        return guess;
+    }
+}
+
+let Math = MathLib();
+
+# ==========================================
+# String Helpers
+# ==========================================
+class StringUtils {
+    func split(s, delimiter) {
+        if (len(delimiter) == 0) {
+            let res = [];
+            for (let i = 0; i < len(s); i += 1) {
+                push(res, s[i]);
+            }
+            return res;
+        }
+
+        let res = [];
+        let current = "";
+        let i = 0;
+        let delim_len = len(delimiter);
+
+        while (i <= len(s) - delim_len) {
+            if (s[i : i + delim_len] == delimiter) {
+                push(res, current);
+                current = "";
+                i += delim_len;
+            } else {
+                current += s[i];
+                i += 1;
+            }
+        }
+
+        while (i < len(s)) {
+            current += s[i];
+            i += 1;
+        }
+        push(res, current);
+        return res;
+    }
+
+    func trim(s) {
+        let start = 0;
+        while (start < len(s) and (s[start] == " " or s[start] == "\n" or s[start] == "\t" or s[start] == "\r")) {
+            start += 1;
+        }
+        let end = len(s);
+        while (end > start and (s[end - 1] == " " or s[end - 1] == "\n" or s[end - 1] == "\t" or s[end - 1] == "\r")) {
+            end -= 1;
+        }
+        return s[start:end];
+    }
+
+    func startsWith(s, prefix) {
+        if (len(prefix) > len(s)) { return false; }
+        return s[0 : len(prefix)] == prefix;
+    }
+
+    func endsWith(s, suffix) {
+        if (len(suffix) > len(s)) { return false; }
+        return s[len(s) - len(suffix) : len(s)] == suffix;
+    }
+}
+
+let Strings = StringUtils();
+
+# ==========================================
+# List Helpers
+# ==========================================
+class ListUtils {
+    func map(arr, fn) {
+        let res = [];
+        for (let i = 0; i < len(arr); i += 1) {
+            push(res, fn(arr[i]));
+        }
+        return res;
+    }
+
+    func filter(arr, fn) {
+        let res = [];
+        for (let i = 0; i < len(arr); i += 1) {
+            if (fn(arr[i])) {
+                push(res, arr[i]);
+            }
+        }
+        return res;
+    }
+
+    func reduce(arr, fn, initial) {
+        let res = initial;
+        for (let i = 0; i < len(arr); i += 1) {
+            res = fn(res, arr[i]);
+        }
+        return res;
+    }
+}
+
+let Lists = ListUtils();

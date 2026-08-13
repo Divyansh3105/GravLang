@@ -1,0 +1,20 @@
+import "lib/std.grav";
+
+# Math
+print("abs(-5) = " + toString(Math.abs(-5)));
+print("floor(3.9) = " + toString(Math.floor(3.9)));
+print("floor(-3.9) = " + toString(Math.floor(-3.9)));
+print("sqrt(16) = " + toString(Math.sqrt(16)));
+print("pow(2, 3) = " + toString(Math.pow(2, 3)));
+
+# String
+print("split: " + toString(Strings.split("hello world!", " ")));
+print("trim: '" + Strings.trim("  foo  ") + "'");
+print("startsWith: " + toString(Strings.startsWith("hello", "he")));
+print("endsWith: " + toString(Strings.endsWith("hello", "llo")));
+
+# Lists
+let arr = [1, 2, 3, 4];
+print("map: " + toString(Lists.map(arr, func(x) { return x * 2; })));
+print("filter: " + toString(Lists.filter(arr, func(x) { return x % 2 == 0; })));
+print("reduce: " + toString(Lists.reduce(arr, func(acc, val) { return acc + val; }, 0)));

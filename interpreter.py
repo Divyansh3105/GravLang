@@ -697,8 +697,8 @@ class Interpreter:
         array = self._exec(node.array, env)
         start = self._exec(node.start, env) if node.start is not None else None
         stop = self._exec(node.stop, env) if node.stop is not None else None
-        if not isinstance(array, list):
-            raise GravLangRuntimeError("Slicing requires an array", node.line)
+        if not isinstance(array, (list, str)):
+            raise GravLangRuntimeError("Slicing requires an array or string", node.line)
         return array[start:stop]
 
     # ── OOP expressions ──────────────────────────────────────────────
