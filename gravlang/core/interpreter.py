@@ -8,11 +8,11 @@ Uses the visitor pattern: ``visit(node)`` dispatches to
 from __future__ import annotations
 import os
 import sys
-import ast_nodes as ast
-from environment import Environment
-from grav_builtins import register_builtins
-from errors import GravLangRuntimeError, BreakSignal, ContinueSignal
-from gravlang_class import GravLangClass, GravLangInstance
+from . import ast_nodes as ast
+from .environment import Environment
+from .grav_builtins import register_builtins
+from .errors import GravLangRuntimeError, BreakSignal, ContinueSignal
+from .gravlang_class import GravLangClass, GravLangInstance
 
 # Raise Python's own recursion limit so our depth check always fires first
 sys.setrecursionlimit(5000)
@@ -300,24 +300,20 @@ class Interpreter:
         - Each file is executed **at most once** per interpreter session
           (circular imports are silently skipped after the first load).
         """
-        from lexer import Lexer as _Lex
-        from parser import Parser as _Par
-        from grav_builtins import BUILTINS
+        from .lexer import Lexer as _Lex
+        from .parser import Parser as _Par
+        from .grav_builtins import BUILTINS
 
         # ── 1. Build the search path ────────────────────────────────────
-        # GravLang project root = directory that contains interpreter.py
-        _gravlang_root = os.path.dirname(os.path.abspath(__file__))
+        # GravLang package root = directory containing gravlang package
+        _core_dir = os.path.dirname(os.path.abspath(__file__))
+        _pkg_dir  = os.path.dirname(_core_dir)
+        _proj_dir = os.path.dirname(_pkg_dir)
 
         candidate_bases: list[str] = []
         if self._current_file:
             candidate_bases.append(os.path.dirname(self._current_file))
-        candidate_bases.append(os.getcwd())
-        if _gravlang_root not in candidate_bases:
-            candidate_bases.append(_gravlang_root)
-        # Always include GravLang root as a last-resort base (even if
-        # it equals CWD) so the "strip leading ../" fallback below is tried.
-        if _gravlang_root not in [os.path.abspath(b) for b in candidate_bases]:
-            candidate_bases.append(_gravlang_root)
+        candidate_bases.extend([os.getcwd(), _proj_dir, _pkg_dir, _core_dir])
 
         # Deduplicate while preserving order
         seen_norm: set[str] = set()
@@ -425,12 +421,7 @@ class Interpreter:
                 if node.catch_body is not None:
                     catch_env = Environment(parent=env)
                     if node.catch_var:
-                        if hasattr(e, "value"):
-                            err_val = e.value
-                        elif hasattr(e, "message"):
-                            err_val = e.message
-                        else:
-                            err_val = str(e)
+                        err_val = getattr(e, "value", getattr(e, "message", str(e)))
                         catch_env.set(node.catch_var, err_val)
                     self._exec(node.catch_body, catch_env)
                 else:

@@ -23,10 +23,12 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 from helpers import run_grav
-from formatter import format_source, format_file, Formatter
-from errors import GravLangError
+from gravlang.core.formatter import format_source, format_file, Formatter
+from gravlang.core.errors import GravLangError
 
 GRAV_DIR = os.path.join(_HERE, "grav")
 

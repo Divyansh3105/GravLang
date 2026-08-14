@@ -7,10 +7,10 @@ directly.
 """
 
 from __future__ import annotations
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
-    from environment import Environment
+    from .environment import Environment
 
 
 # ── I/O ──────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ def _builtin_len(value):
 
 def _builtin_type(value):
     """type(value) → string name of the GravLang type."""
-    from gravlang_class import GravLangInstance
+    from .gravlang_class import GravLangInstance
     if value is None:
         return "null"
     if isinstance(value, GravLangInstance):
@@ -58,7 +58,7 @@ def _builtin_type(value):
 
 def _builtin_hasAttr(obj, attr_name):
     """hasAttr(obj, name) → true/false whether the attribute exists."""
-    from gravlang_class import GravLangInstance
+    from .gravlang_class import GravLangInstance
     if not isinstance(obj, GravLangInstance):
         raise TypeError("hasAttr() expects an object instance as first argument")
     return attr_name in obj.fields
@@ -208,7 +208,7 @@ def _builtin_sort(arr):
 
 # ── registry ────────────────────────────────────────────────────────
 
-BUILTINS: dict[str, callable] = {
+BUILTINS: dict[str, Callable] = {
     "print":    _builtin_print,
     "input":    _builtin_input,
     "len":      _builtin_len,

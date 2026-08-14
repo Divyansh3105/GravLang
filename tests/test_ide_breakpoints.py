@@ -1,11 +1,11 @@
 import unittest
 import tkinter as tk
-from gravlang_ide.editor import EditorTab
-from gravlang_ide.themes import THEMES
-from interpreter import Interpreter
-from environment import Environment
-from parser import Parser
-from lexer import Lexer
+from gravlang.ide.editor import EditorTab
+from gravlang.ide.themes import THEMES
+from gravlang.core.interpreter import Interpreter
+from gravlang.core.environment import Environment
+from gravlang.core.parser import Parser
+from gravlang.core.lexer import Lexer
 
 
 class TestIDEBreakpoints(unittest.TestCase):

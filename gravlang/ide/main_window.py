@@ -9,37 +9,45 @@ from .editor import EditorTab
 from .compiler_view import CompilerStagesWindow
 from .bottom_panel import BottomPanel
 from .welcome_view import WelcomeView
-try:
-    from lexer import Lexer
-    from parser import Parser
-    from interpreter import Interpreter
-    from errors import GravLangError
-    HAS_GRAVLANG = True
-except ImportError:
-    HAS_GRAVLANG = False
+from typing import TYPE_CHECKING, Any
 
-    class GravLangError(Exception):
-        pass
+if TYPE_CHECKING:
+    HAS_GRAVLANG: bool = True
+    from ..core.lexer import Lexer
+    from ..core.parser import Parser
+    from ..core.interpreter import Interpreter
+    from ..core.errors import GravLangError
+else:
+    try:
+        from ..core.lexer import Lexer
+        from ..core.parser import Parser
+        from ..core.interpreter import Interpreter
+        from ..core.errors import GravLangError
+        HAS_GRAVLANG = True
+    except ImportError:
+        HAS_GRAVLANG = False
 
-    class _FakeEnv:
-        _store = {}
+        class GravLangError(Exception):
+            pass
 
-    class Interpreter:
-        def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
-            self.global_env = _FakeEnv()
-            self._print_fn = print_fn or print
+        class _FakeEnv:
+            _store = {}
 
+        class Interpreter:
+            def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
+                self.global_env = _FakeEnv()
+                self._print_fn = print_fn or print
 
-        def interpret(self, tree):
-            self._print_fn("GravLang runtime not found.\nRunning in demo mode.")
+            def interpret(self, tree):
+                self._print_fn("GravLang runtime not found.\nRunning in demo mode.")
 
-    class Lexer:
-        def __init__(self, src): pass
-        def tokenize(self): return []
+        class Lexer:
+            def __init__(self, src): pass
+            def tokenize(self): return []
 
-    class Parser:
-        def __init__(self, tokens): pass
-        def parse(self): return None
+        class Parser:
+            def __init__(self, tokens): pass
+            def parse(self): return None
 
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
@@ -73,6 +81,7 @@ class GravLangIDE:
         self._is_stepping  = False
         self._step_event   = threading.Event()
         self._last_paused_line = -1
+        self._active_input_event: threading.Event | None = None
 
         self.root.configure(bg=self.theme["BG_BASE"])
         self._build_ui()
@@ -179,7 +188,7 @@ class GravLangIDE:
         plus.bind("<Button-1>", lambda e: self.new_tab())
 
         self._tabbar = bar
-        self._tab_labels: list[tk.Frame] = []
+        self._tab_labels: list[dict[str, Any]] = []
 
     def _build_toolbar(self):
         t   = self.theme
@@ -735,7 +744,7 @@ class GravLangIDE:
         if not tab: return
         code = tab.get_content()
         try:
-            from formatter import format_source
+            from ..core.formatter import format_source
             formatted = format_source(code)
             if formatted != code:
                 tab.set_content(formatted)
@@ -844,9 +853,10 @@ class GravLangIDE:
         stages_open = (self._stages_win is not None and self._stages_win.is_open())
         stages_ref  = self._stages_win if stages_open else None
 
-        if stages_ref:
-            self.root.after(0, lambda: stages_ref.clear_all())
-            self.root.after(0, lambda: stages_ref.set_status("⏳  Compiling…"))
+        if stages_ref is not None:
+            stg = stages_ref
+            self.root.after(0, lambda s=stg: s.clear_all())
+            self.root.after(0, lambda s=stg: s.set_status("⏳  Compiling…"))
 
         def _run_in_thread():
             lex_tokens = []
@@ -858,18 +868,20 @@ class GravLangIDE:
             try:
                 # ── Stage 1: Lexer ────────────────────────────────────────
                 lex_tokens = Lexer(code).tokenize()
-                if stages_ref:
+                if stages_ref is not None:
+                    stg = stages_ref
                     toks_snap = list(lex_tokens)
-                    self.root.after(0, lambda: stages_ref.show_tokens(toks_snap))
+                    self.root.after(0, lambda s=stg, t=toks_snap: s.show_tokens(t))
 
                 # ── Stage 2: Parser ───────────────────────────────────────
                 ast_tree = Parser(lex_tokens).parse()
-                if stages_ref:
+                if stages_ref is not None:
+                    stg = stages_ref
                     tree_snap = ast_tree
-                    self.root.after(10, lambda: stages_ref.show_ast(tree_snap))
+                    self.root.after(10, lambda s=stg, t=tree_snap: s.show_ast(t))
 
                 # ── Stage 3: Interpreter (with trace) ─────────────────────
-                import ast_nodes as _an
+                from ..core import ast_nodes as _an
                 import dataclasses
 
                 def _on_step_hook(line, env):
@@ -884,7 +896,7 @@ class GravLangIDE:
                     if line == self._last_paused_line:
                         return
                     if self._cancel_flag:
-                        from errors import GravLangError
+                        from ..core.errors import GravLangError
                         raise GravLangError("Execution stopped")
                     
                     self._last_paused_line = line
@@ -906,34 +918,29 @@ class GravLangIDE:
                     self._step_event.clear()
                     self._step_event.wait()
                     if self._cancel_flag:
-                        from errors import GravLangError
+                        from ..core.errors import GravLangError
                         raise GravLangError("Execution stopped")
 
-                if stages_ref:
+                if stages_ref is not None:
                     # Wrap Interpreter to intercept variable declarations/assignments
-                    orig_visit_VarDecl   = None
-                    orig_visit_Assign    = None
-                    orig_visit_AugAssign = None
-                    orig_call            = None
-
                     interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code, on_step=_on_step_hook)
 
-                    _orig_vd  = interp._visit_VarDecl
-                    _orig_as  = interp._visit_Assign
-                    _orig_aug = interp._visit_AugAssign
-                    _orig_fc  = interp._visit_FuncCall
-                    _orig_mc  = interp._visit_MethodCall
-                    _orig_fd  = interp._visit_FuncDecl
-                    _orig_cd  = interp._visit_ClassDecl
+                    _orig_vd  = getattr(interp, "_visit_VarDecl", None)
+                    _orig_as  = getattr(interp, "_visit_Assign", None)
+                    _orig_aug = getattr(interp, "_visit_AugAssign", None)
+                    _orig_fc  = getattr(interp, "_visit_FuncCall", None)
+                    _orig_mc  = getattr(interp, "_visit_MethodCall", None)
+                    _orig_fd  = getattr(interp, "_visit_FuncDecl", None)
+                    _orig_cd  = getattr(interp, "_visit_ClassDecl", None)
 
                     def _traced_vd(node, env):
-                        result = _orig_vd(node, env)
+                        result = _orig_vd(node, env) if _orig_vd else None
                         val = env._store.get(node.name, "?")
                         trace_lines.append((f"L{node.line}  let {node.name} = {val!r}", "trace"))
                         return result
 
                     def _traced_as(node, env):
-                        result = _orig_as(node, env)
+                        result = _orig_as(node, env) if _orig_as else None
                         try:
                             val = env.get(node.name)
                         except Exception:
@@ -942,7 +949,7 @@ class GravLangIDE:
                         return result
 
                     def _traced_aug(node, env):
-                        result = _orig_aug(node, env)
+                        result = _orig_aug(node, env) if _orig_aug else None
                         try:
                             val = env.get(node.name)
                         except Exception:
@@ -951,30 +958,31 @@ class GravLangIDE:
                         return result
 
                     def _traced_fc(node, env):
-                        args = [interp._exec(a, env) for a in node.args]
+                        exec_fn = getattr(interp, "_exec", None)
+                        args = [exec_fn(a, env) for a in node.args] if exec_fn else []
                         trace_lines.append((f"L{node.line}  call {node.name}({', '.join(repr(a) for a in args)})", "type"))
                         try:
                             callee = env.get(node.name)
                         except Exception:
                             callee = None
-                        from grav_builtins import register_builtins
-                        from gravlang_class import GravLangClass
+                        from ..core.grav_builtins import register_builtins
+                        from ..core.gravlang_class import GravLangClass
                         # Re-use original logic but skip double-eval of args by short-circuit
-                        return _orig_fc(node, env)
+                        return _orig_fc(node, env) if _orig_fc else None
 
                     def _traced_fd(node, env):
                         trace_lines.append((f"L{node.line}  define func {node.name}({', '.join(node.params)})", "muted"))
-                        return _orig_fd(node, env)
+                        return _orig_fd(node, env) if _orig_fd else None
 
                     def _traced_cd(node, env):
                         trace_lines.append((f"L{node.line}  define class {node.name}", "muted"))
-                        return _orig_cd(node, env)
+                        return _orig_cd(node, env) if _orig_cd else None
 
-                    interp._visit_VarDecl   = _traced_vd
-                    interp._visit_Assign    = _traced_as
-                    interp._visit_AugAssign = _traced_aug
-                    interp._visit_FuncDecl  = _traced_fd
-                    interp._visit_ClassDecl = _traced_cd
+                    setattr(interp, "_visit_VarDecl",   _traced_vd)
+                    setattr(interp, "_visit_Assign",    _traced_as)
+                    setattr(interp, "_visit_AugAssign", _traced_aug)
+                    setattr(interp, "_visit_FuncDecl",  _traced_fd)
+                    setattr(interp, "_visit_ClassDecl", _traced_cd)
                     # Note: we skip wrapping FuncCall as it would double-eval args
 
                 else:
@@ -985,39 +993,42 @@ class GravLangIDE:
                 output_lines = list(lines)
                 store_out = dict(interp.global_env._store)
 
-                if stages_ref:
+                if stages_ref is not None:
+                    stg = stages_ref
                     tl_snap = list(trace_lines)
-                    self.root.after(20, lambda: stages_ref.show_trace(tl_snap))
-                    self.root.after(30, lambda: stages_ref.set_status(
-                        f"✓  Pipeline complete in {elapsed:.3f}s  ·  "
-                        f"{len(lex_tokens)-1} tokens  ·  {len(tl_snap)} traced events"))
+                    self.root.after(20, lambda s=stg, t=tl_snap: s.show_trace(t))
+                    self.root.after(30, lambda s=stg, t=tl_snap, e=elapsed, tk=lex_tokens: s.set_status(
+                        f"✓  Pipeline complete in {e:.3f}s  ·  "
+                        f"{len(tk)-1} tokens  ·  {len(t)} traced events"))
 
                 self.root.after(0, lambda: self._finish_run(output_lines, [], elapsed, store_out))
 
             except GravLangError as e:
                 elapsed = time.time() - t_start
                 output_lines = list(lines)
-                if stages_ref:
+                if stages_ref is not None:
+                    stg = stages_ref
                     err_msg = str(e)
                     # Still show partial results
                     if lex_tokens:
                         toks_snap = list(lex_tokens)
-                        self.root.after(0, lambda: stages_ref.show_tokens(toks_snap))
+                        self.root.after(0, lambda s=stg, t=toks_snap: s.show_tokens(t))
                     if ast_tree is not None:
                         tree_snap = ast_tree
-                        self.root.after(10, lambda: stages_ref.show_ast(tree_snap))
+                        self.root.after(10, lambda s=stg, t=tree_snap: s.show_ast(t))
                     tl_snap = list(trace_lines)
                     if tl_snap:
-                        self.root.after(20, lambda: stages_ref.show_trace(tl_snap))
-                    self.root.after(30, lambda: stages_ref.set_status(f"❌  {err_msg}"))
-                self.root.after(0, lambda e=e: self._finish_run(output_lines, [str(e)], elapsed, {}))
+                        self.root.after(20, lambda s=stg, t=tl_snap: s.show_trace(t))
+                    self.root.after(30, lambda s=stg, m=err_msg: s.set_status(f"❌  {m}"))
+                self.root.after(0, lambda err=e: self._finish_run(output_lines, [str(err)], elapsed, {}))
 
             except Exception as e:
                 elapsed = time.time() - t_start
                 output_lines = list(lines)
-                if stages_ref:
-                    self.root.after(0, lambda e=e: stages_ref.set_status(f"❌  Internal error: {e}"))
-                self.root.after(0, lambda e=e: self._finish_run(output_lines, [f"Internal error: {e}"], elapsed, {}))
+                if stages_ref is not None:
+                    stg = stages_ref
+                    self.root.after(0, lambda s=stg, err=e: s.set_status(f"❌  Internal error: {err}"))
+                self.root.after(0, lambda err=e: self._finish_run(output_lines, [f"Internal error: {err}"], elapsed, {}))
 
 
         self._run_thread = threading.Thread(target=_run_in_thread, daemon=True)
@@ -1032,8 +1043,9 @@ class GravLangIDE:
             tab.set_paused_line(None)
         if hasattr(self, "_input_bar"):
             self.root.after(0, lambda: self._input_bar.pack_forget())
-        if getattr(self, "_active_input_event", None):
-            self._active_input_event.set()
+        evt = self._active_input_event
+        if evt is not None:
+            evt.set()
         self._append_output("⚠ Stop requested — waiting for current operation...\n", "error")
 
     def _finish_run(self, lines, errors, elapsed, store):
@@ -1178,12 +1190,6 @@ class GravLangIDE:
             self._sidebar.pack(side="left", fill="y",
                                before=self._editor_pane)
         self._sidebar_visible = not self._sidebar_visible
-
-    def _toggle_find(self):
-        if self._findbar.winfo_ismapped():
-            self._findbar.hide()
-        else:
-            self._findbar.show()
 
     def _minimize_window(self):
         """Minimize the window to taskbar."""

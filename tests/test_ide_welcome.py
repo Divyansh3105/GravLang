@@ -1,8 +1,8 @@
 import unittest
 import tkinter as tk
 import os
-from gravlang_ide.welcome_view import WelcomeView
-from gravlang_ide.themes import THEMES
+from gravlang.ide.welcome_view import WelcomeView
+from gravlang.ide.themes import THEMES
 
 
 class TestIDEWelcomeView(unittest.TestCase):

@@ -18,9 +18,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
 
 from helpers import run_grav, run_grav_file
-from errors import GravLangError
+from gravlang.core.errors import GravLangError
 
 GRAV_DIR = os.path.join(_HERE, "grav")
 
@@ -518,19 +520,19 @@ class TestDictOps:
 # 26 Error handling
 class TestErrors:
     def test_lexer_error_bad_char(self):
-        from errors import LexerError
+        from gravlang.core.errors import LexerError
         with pytest.raises(LexerError):
             run_grav("let x = @;")
     def test_parse_error_missing_semi(self):
-        from errors import ParseError
+        from gravlang.core.errors import ParseError
         with pytest.raises(ParseError):
             run_grav("let x = 1")
     def test_runtime_error_undefined_var(self):
-        from errors import GravLangRuntimeError
+        from gravlang.core.errors import GravLangRuntimeError
         with pytest.raises(GravLangRuntimeError, match="Undefined variable"):
             run_grav("print(nope);")
     def test_runtime_type_error(self):
-        from errors import GravLangRuntimeError
+        from gravlang.core.errors import GravLangRuntimeError
         with pytest.raises(GravLangRuntimeError):
             run_grav("let x = 5; x[0];")
 

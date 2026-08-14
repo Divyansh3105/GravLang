@@ -2,31 +2,43 @@ import tkinter as tk
 from tkinter import ttk
 import re
 import threading
+from typing import Sequence
 from .themes import THEMES
 
-try:
-    from lexer import Lexer
-    from parser import Parser
-    from interpreter import Interpreter
-    from environment import Environment
-    from grav_builtins import register_builtins
-    from errors import GravLangError
-    HAS_GRAVLANG = True
-except ImportError:
-    HAS_GRAVLANG = False
+from typing import TYPE_CHECKING
 
-    class GravLangError(Exception):
-        pass
+if TYPE_CHECKING:
+    HAS_GRAVLANG: bool = True
+    from ..core.lexer import Lexer
+    from ..core.parser import Parser
+    from ..core.interpreter import Interpreter
+    from ..core.environment import Environment
+    from ..core.grav_builtins import register_builtins
+    from ..core.errors import GravLangError
+else:
+    try:
+        from ..core.lexer import Lexer
+        from ..core.parser import Parser
+        from ..core.interpreter import Interpreter
+        from ..core.environment import Environment
+        from ..core.grav_builtins import register_builtins
+        from ..core.errors import GravLangError
+        HAS_GRAVLANG = True
+    except ImportError:
+        HAS_GRAVLANG = False
 
-    class Environment:
-        _store = {}
-
-    class Interpreter:
-        def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
-            self.global_env = Environment()
-
-        def interpret(self, tree):
+        class GravLangError(Exception):
             pass
+
+        class Environment:
+            _store = {}
+
+        class Interpreter:
+            def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
+                self.global_env = Environment()
+
+            def interpret(self, tree):
+                pass
 
 
 class ProblemsView(tk.Frame):
@@ -84,7 +96,7 @@ class ProblemsView(tk.Frame):
         self.tree.bind("<Double-1>", self._on_select)
         self.tree.bind("<Return>", self._on_select)
 
-    def set_problems(self, problems: list[tuple[str, int | str, str]]):
+    def set_problems(self, problems: Sequence[tuple[str, int | str, str]]):
         """Populate list of problems: [(severity, line, message), ...]"""
         self.tree.delete(*self.tree.get_children())
         for sev, line, msg in problems:
@@ -264,7 +276,7 @@ class BottomPanel(tk.Frame):
         txt.delete("1.0", "end")
         txt.configure(state="disabled")
 
-    def set_problems(self, problems: list[tuple[str, int | str, str]]):
+    def set_problems(self, problems: Sequence[tuple[str, int | str, str]]):
         self.problems_view.set_problems(problems)
         count = len(problems)
         self.tab_btns[1].configure(text=f"⚠️ Problems ({count})")

@@ -1,7 +1,7 @@
 import unittest
 import tkinter as tk
-from gravlang_ide.editor import EditorTab
-from gravlang_ide.themes import THEMES
+from gravlang.ide.editor import EditorTab
+from gravlang.ide.themes import THEMES
 
 
 class TestIDEGutter(unittest.TestCase):

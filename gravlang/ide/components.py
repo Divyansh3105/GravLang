@@ -17,7 +17,7 @@ class LintTooltip:
 
     _DELAY_MS = 300   # ms to wait before showing (avoid flicker on fast moves)
 
-    def __init__(self, root: tk.Tk, theme: dict):
+    def __init__(self, root: tk.Tk | tk.Toplevel, theme: dict):
         self._root    = root
         self.theme    = theme
         self._win     = None
@@ -212,6 +212,9 @@ class AutoCompletePopup:
 
     def _on_focus_out(self, event):
         # Only hide if focus moved outside of both popup and its listbox
+        if not self.popup:
+            self.hide()
+            return
         try:
             fw = self.popup.focus_get()
             if fw and (fw == self.popup or fw == self.listbox):
@@ -636,7 +639,7 @@ def _simple_dialog(parent, title, prompt, initial=""):
     dlg.title(title)
     dlg.configure(bg="#181825")
     dlg.resizable(False, False)
-    result = [None]
+    result: list[str | None] = [None]
     tk.Label(dlg, text=prompt, bg="#181825", fg="#cdd6f4",
              font=("Segoe UI", 10)).pack(padx=16, pady=(12, 4))
     var = tk.StringVar(value=initial)

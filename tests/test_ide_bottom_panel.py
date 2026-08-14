@@ -1,7 +1,7 @@
 import unittest
 import tkinter as tk
-from gravlang_ide.bottom_panel import BottomPanel, ProblemsView
-from gravlang_ide.themes import THEMES
+from gravlang.ide.bottom_panel import BottomPanel, ProblemsView
+from gravlang.ide.themes import THEMES
 
 
 class TestIDEBottomPanel(unittest.TestCase):

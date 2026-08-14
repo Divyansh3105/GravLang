@@ -1,6 +1,6 @@
 import unittest
 import tkinter as tk
-from gravlang_ide.main_window import GravLangIDE, SPINNER_FRAMES
+from gravlang.ide.main_window import GravLangIDE, SPINNER_FRAMES
 
 
 class TestIDEStatusbar(unittest.TestCase):

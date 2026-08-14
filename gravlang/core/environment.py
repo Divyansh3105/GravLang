@@ -6,7 +6,7 @@ for blocks and function calls.
 """
 
 from __future__ import annotations
-from errors import GravLangRuntimeError
+from .errors import GravLangRuntimeError
 
 
 class Environment:

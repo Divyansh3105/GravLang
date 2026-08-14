@@ -35,10 +35,10 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-import ast_nodes as ast
-from lexer import Lexer
-from parser import Parser
-from errors import GravLangError
+from . import ast_nodes as ast
+from .lexer import Lexer
+from .parser import Parser
+from .errors import GravLangError
 
 
 # ── Operator precedence table (used for parenthesis insertion) ───────────────

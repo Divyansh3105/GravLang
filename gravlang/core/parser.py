@@ -10,9 +10,9 @@ Operator precedence (low → high):
 
 from __future__ import annotations
 import re as _re
-from lexer import Token, Lexer
-from errors import ParseError
-import ast_nodes as ast
+from .lexer import Token, Lexer
+from .errors import ParseError
+from . import ast_nodes as ast
 
 # Augmented-assignment token map
 _AUG_OPS = {

@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>🌌 GravLang</h1>
+  <h1>GravLang</h1>
   <p><strong>A lightweight, elegantly designed programming language with a built-in Python interpreter and IDE.</strong></p>
 
 [![Python version](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -48,6 +48,7 @@ Whether you execute it headlessly or via its built-in interactive GUI IDE, GravL
 The complete language specification, syntax guide, and built-in function reference is available on our **[Documentation Site](https://yourusername.github.io/GravLang/)** (generated via MkDocs).
 
 To run the documentation locally:
+
 ```bash
 pip install mkdocs-material
 mkdocs serve

@@ -8,7 +8,7 @@ scanning with named groups.
 from __future__ import annotations
 import re
 from dataclasses import dataclass
-from errors import LexerError
+from .errors import LexerError
 
 
 # ── Token ────────────────────────────────────────────────────────────
@@ -154,6 +154,9 @@ class Lexer:
 
             kind = mo.lastgroup
             value = mo.group()
+
+            if kind is None:
+                continue
 
             if kind == "NEWLINE":
                 line += 1

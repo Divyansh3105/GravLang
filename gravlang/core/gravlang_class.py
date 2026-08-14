@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import ast_nodes as ast
+    from . import ast_nodes as ast
 
 
 class GravLangClass:

@@ -1,17 +1,26 @@
 import tkinter as tk
 from tkinter import ttk
 from .themes import THEMES
-try:
-    from lexer import Lexer
-    from parser import Parser
-    from interpreter import Interpreter
-    from errors import GravLangError
-    HAS_GRAVLANG = True
-except ImportError:
-    HAS_GRAVLANG = False
+from typing import TYPE_CHECKING
 
-    class GravLangError(Exception):
-        pass
+if TYPE_CHECKING:
+    HAS_GRAVLANG: bool = True
+    from ..core.lexer import Lexer
+    from ..core.parser import Parser
+    from ..core.interpreter import Interpreter
+    from ..core.errors import GravLangError
+else:
+    try:
+        from ..core.lexer import Lexer
+        from ..core.parser import Parser
+        from ..core.interpreter import Interpreter
+        from ..core.errors import GravLangError
+        HAS_GRAVLANG = True
+    except ImportError:
+        HAS_GRAVLANG = False
+
+        class GravLangError(Exception):
+            pass
 
     class _FakeEnv:
         _store = {}
@@ -42,7 +51,7 @@ def _offset_to_pos(text, offset):
 # ─────────────────────────────────────────────────────────────────────────────
 #  AST PRETTY-PRINTER  (for the Stages panel)
 # ─────────────────────────────────────────────────────────────────────────────
-import ast_nodes as _ast
+from ..core import ast_nodes as _ast
 
 def _ast_to_text(node, indent=0) -> str:
     """Convert an AST node to a readable indented text representation."""

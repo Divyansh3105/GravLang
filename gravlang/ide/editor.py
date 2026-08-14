@@ -8,46 +8,55 @@ from .constants import _AC_KEYWORDS, _AC_BUILTINS
 from .themes import THEMES
 from .components import LintTooltip, AutoCompletePopup, FindReplaceBar
 from .compiler_view import _offset_to_pos
-try:
-    from lexer import Lexer
-    from parser import Parser
-    from interpreter import Interpreter
-    from errors import GravLangError
-    HAS_GRAVLANG = True
-except ImportError:
-    HAS_GRAVLANG = False
+from typing import TYPE_CHECKING, Any
 
-    class GravLangError(Exception):
-        pass
+if TYPE_CHECKING:
+    HAS_GRAVLANG: bool = True
+    from ..core.lexer import Lexer
+    from ..core.parser import Parser
+    from ..core.interpreter import Interpreter
+    from ..core.errors import GravLangError
+else:
+    try:
+        from ..core.lexer import Lexer
+        from ..core.parser import Parser
+        from ..core.interpreter import Interpreter
+        from ..core.errors import GravLangError
+        HAS_GRAVLANG = True
+    except ImportError:
+        HAS_GRAVLANG = False
 
-    class _FakeEnv:
-        _store = {}
+        class GravLangError(Exception):
+            pass
 
-    class Interpreter:
-        def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
-            self.global_env = _FakeEnv()
-            self._print_fn = print_fn or print
+        class _FakeEnv:
+            _store = {}
 
+        class Interpreter:
+            def __init__(self, print_fn=None, input_fn=None, source="", **kwargs):
+                self.global_env = _FakeEnv()
+                self._print_fn = print_fn or print
 
-        def interpret(self, tree):
-            self._print_fn("GravLang runtime not found.\nRunning in demo mode.")
+            def interpret(self, tree):
+                self._print_fn("GravLang runtime not found.\nRunning in demo mode.")
 
-    class Lexer:
-        def __init__(self, src): pass
-        def tokenize(self): return []
+        class Lexer:
+            def __init__(self, src): pass
+            def tokenize(self): return []
 
-    class Parser:
-        def __init__(self, tokens): pass
-        def parse(self): return None
+        class Parser:
+            def __init__(self, tokens): pass
+            def parse(self): return None
 
 class EditorTab:
+    _autocomplete: AutoCompletePopup
+
     def __init__(self, parent_frame, theme, on_change_cb, on_cursor_cb):
         self.theme = theme
         self.filepath: str  = ""
         self.modified: bool = False
         self._on_change = on_change_cb
         self._on_cursor = on_cursor_cb
-        self._autocomplete: AutoCompletePopup = None
         self.breakpoints: set[int] = set()
         self.paused_line: int | None = None
         self.folded_blocks: set[int] = set()

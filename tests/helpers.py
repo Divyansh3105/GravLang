@@ -10,10 +10,10 @@ from __future__ import annotations
 import os
 from typing import Union
 
-from lexer import Lexer
-from parser import Parser
-from interpreter import Interpreter
-from errors import GravLangError
+from gravlang.core.lexer import Lexer
+from gravlang.core.parser import Parser
+from gravlang.core.interpreter import Interpreter
+from gravlang.core.errors import GravLangError
 
 
 def run_grav(
