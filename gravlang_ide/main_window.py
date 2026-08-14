@@ -41,6 +41,8 @@ except ImportError:
         def __init__(self, tokens): pass
         def parse(self): return None
 
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
 class GravLangIDE:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -463,29 +465,33 @@ class GravLangIDE:
 
     def _build_statusbar(self):
         t  = self.theme
-        sb = tk.Frame(self.root, bg=t["STATUS_BG"], height=22)
+        sb = tk.Frame(self.root, bg=t["STATUS_BG"], height=26)
         sb.pack(fill="x", side="bottom")
         sb.pack_propagate(False)
 
         self._status_lang = tk.Label(sb, text="⬤ GravLang",
             bg=t["STATUS_BG"], fg=t["STATUS_FG"],
-            font=("Segoe UI", 10, "bold"))
+            font=("Segoe UI", 9, "bold"), pady=3)
         self._status_lang.pack(side="left", padx=8)
 
         self._status_file = tk.Label(sb, text="untitled.grav",
-            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 9), pady=3)
         self._status_file.pack(side="left", padx=4)
 
+        self._status_stats = tk.Label(sb, text="🌐 Vars: 0 · 📦 Objects: 0",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 9), pady=3)
+        self._status_stats.pack(side="left", padx=16)
+
         self._status_cursor = tk.Label(sb, text="Ln 1, Col 1",
-            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 9), pady=3)
         self._status_cursor.pack(side="right", padx=8)
 
         self._status_lines = tk.Label(sb, text="1 line",
-            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 9), pady=3)
         self._status_lines.pack(side="right", padx=8)
 
-        self._status_run = tk.Label(sb, text="UTF-8",
-            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 10))
+        self._status_run = tk.Label(sb, text="Ready",
+            bg=t["STATUS_BG"], fg=t["STATUS_FG"], font=("Segoe UI", 9), pady=3)
         self._status_run.pack(side="right", padx=8)
 
         self._statusbar = sb
@@ -1045,9 +1051,9 @@ class GravLangIDE:
         else:
             self._append_output(f"✓ Done in {elapsed:.3f}s\n", "timing")
             self._set_status_done(elapsed)
-        if store:
+        if store is not None:
             self._inspector.populate(store)
-
+            self._update_scope_stats(store)
 
     def _append_output(self, text: str, tag: str = ""):
         if hasattr(self, "_bottom_panel"):
@@ -1078,19 +1084,62 @@ class GravLangIDE:
     # ── STATUS ────────────────────────────────────────────────────────────────
 
     def _set_status_running(self):
-        t = self.theme
-        self._status_run.configure(text="⏳ Running...",
-            bg=t["STATUS_BG"], fg=t["STATUS_FG"])
+        self._is_running = True
+        self._spinner_idx = 0
+        self._animate_spinner()
 
-    def _set_status_done(self, elapsed):
+    def _animate_spinner(self):
+        if not getattr(self, "_is_running", False):
+            return
+        frame = SPINNER_FRAMES[self._spinner_idx % len(SPINNER_FRAMES)]
+        self._spinner_idx += 1
         t = self.theme
-        self._status_run.configure(text=f"✓ Done in {elapsed:.3f}s",
-            bg=t["STATUS_BG"], fg=t["STATUS_FG"])
+        self._status_run.configure(
+            text=f"{frame} Running...",
+            bg=t["STATUS_BG"],
+            fg=t["BLUE"]
+        )
+        self.root.after(80, self._animate_spinner)
 
-    def _set_status_error(self, elapsed):
+    def _set_status_done(self, elapsed: float):
         t = self.theme
-        self._status_run.configure(text=f"✗ Error {elapsed:.3f}s",
-            bg=t["RED"], fg="#1e1e2e")
+        self._is_running = False
+        tab = self._active_tab()
+        byte_count = len(tab.get_content().encode("utf-8")) if tab else 0
+        self._status_run.configure(
+            text=f"⚡ Executed in {elapsed:.3f}s · {byte_count} B",
+            bg=t["STATUS_BG"],
+            fg=t["GREEN"]
+        )
+
+    def _set_status_error(self, elapsed: float):
+        t = self.theme
+        self._is_running = False
+        tab = self._active_tab()
+        byte_count = len(tab.get_content().encode("utf-8")) if tab else 0
+        self._status_run.configure(
+            text=f"❌ Error in {elapsed:.3f}s · {byte_count} B",
+            bg=t["RED"],
+            fg="#1e1e2e"
+        )
+
+    def _update_scope_stats(self, store: dict | None):
+        if not store:
+            vars_count = 0
+            obj_count = 0
+        else:
+            vars_count = len(store)
+            obj_count = sum(
+                1 for v in store.values()
+                if isinstance(v, (list, dict, tuple, set)) or hasattr(v, "fields") or hasattr(v, "methods")
+            )
+        t = self.theme
+        if hasattr(self, "_status_stats"):
+            self._status_stats.configure(
+                text=f"🌐 Vars: {vars_count} · 📦 Objects: {obj_count}",
+                bg=t["STATUS_BG"],
+                fg=t["STATUS_FG"]
+            )
 
     def _on_cursor_move(self, row: int, col: int):
         t = self.theme
