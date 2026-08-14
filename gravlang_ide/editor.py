@@ -48,6 +48,7 @@ class EditorTab:
         self._on_change = on_change_cb
         self._on_cursor = on_cursor_cb
         self._autocomplete: AutoCompletePopup = None
+        self.breakpoints: set[int] = set()
         self._frame = tk.Frame(parent_frame, bg=theme["BG_BASE"])
         self._build()
 
@@ -61,8 +62,9 @@ class EditorTab:
         self.line_frame.pack(side="left", fill="y")
         self.line_frame.pack_propagate(False)
         self.ln_canvas = tk.Canvas(self.line_frame, bg=t["BG_BASE"],
-                                   width=44, highlightthickness=0)
+                                   width=44, highlightthickness=0, cursor="hand2")
         self.ln_canvas.pack(fill="both", expand=True)
+        self.ln_canvas.bind("<Button-1>", self._on_gutter_click)
 
         # editor
         self.editor = tk.Text(
@@ -403,18 +405,53 @@ class EditorTab:
         cur_row = ed.index("insert").split(".")[0]
         ed.tag_add("active_ln", f"{cur_row}.0", f"{cur_row}.end+1c")
 
+    def _on_gutter_click(self, event):
+        try:
+            idx = self.editor.index(f"@0,{event.y}")
+            line = int(idx.split(".")[0])
+            total_lines = int(self.editor.index("end-1c").split(".")[0])
+            if 1 <= line <= total_lines:
+                self.toggle_breakpoint(line)
+        except Exception:
+            pass
+
+    def toggle_breakpoint(self, line: int) -> bool:
+        if line in self.breakpoints:
+            self.breakpoints.remove(line)
+            res = False
+        else:
+            self.breakpoints.add(line)
+            res = True
+        self._update_line_numbers()
+        return res
+
+    def clear_breakpoints(self):
+        self.breakpoints.clear()
+        self._update_line_numbers()
+
     def _update_line_numbers(self):
         self.ln_canvas.delete("all")
         t = self.theme
         i = self.editor.index("@0,0")
         cur_row = self.editor.index("insert").split(".")[0]
-        y = 4
+        red_color = t.get("RED", "#f38ba8")
+        border_color = t.get("PEACH", "#f9e2af")
         while True:
             dline = self.editor.dlineinfo(i)
             if dline is None: break
             _, dy, _, dh, _ = dline
             linenum = i.split(".")[0]
+            line_int = int(linenum)
             color = t["TEXT_MAIN"] if linenum == cur_row else t["TEXT_SUB"]
+
+            # Draw red dot if line has a breakpoint
+            if line_int in self.breakpoints:
+                cy = dy + dh // 2
+                self.ln_canvas.create_oval(
+                    4, cy - 5, 14, cy + 5,
+                    fill=red_color, outline=border_color, width=1
+                )
+
             self.ln_canvas.create_text(38, dy + dh // 2,
                 text=linenum, anchor="e",
                 fill=color, font=("Consolas", 11))

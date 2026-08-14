@@ -817,6 +817,12 @@ class GravLangIDE:
                 import dataclasses
 
                 def _on_step_hook(line, env):
+                    active_tab = self._active_tab()
+                    is_bp = active_tab and (line in active_tab.breakpoints)
+
+                    if is_bp and line != self._last_paused_line:
+                        self._is_stepping = True
+
                     if not getattr(self, "_is_stepping", False):
                         return
                     if line == self._last_paused_line:
@@ -835,6 +841,9 @@ class GravLangIDE:
                             tab.editor.tag_remove("step_highlight", "1.0", "end")
                             tab.editor.tag_add("step_highlight", f"{line}.0", f"{line}.end")
                             tab.editor.see(f"{line}.0")
+                        status_msg = f"⏸ Paused at line {line} (Breakpoint)" if is_bp else f"⏸ Paused at line {line}"
+                        if hasattr(self, "_status_run"):
+                            self._status_run.configure(text=status_msg)
                     
                     self.root.after(0, _update_ui)
                     self._step_event.clear()
