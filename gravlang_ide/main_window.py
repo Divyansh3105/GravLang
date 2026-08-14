@@ -7,6 +7,8 @@ from .constants import *
 from .components import VariableInspector, FileExplorer, _simple_dialog, FindReplaceBar
 from .editor import EditorTab
 from .compiler_view import CompilerStagesWindow
+from .bottom_panel import BottomPanel
+from .welcome_view import WelcomeView
 try:
     from lexer import Lexer
     from parser import Parser
@@ -51,6 +53,9 @@ class GravLangIDE:
         theme_name   = self._config.get("theme", "Catppuccin Mocha")
         self.theme   = THEMES.get(theme_name, THEMES["Catppuccin Mocha"])
         self.theme_name = theme_name
+        self._recent_files: list[str] = [
+            p for p in self._config.get("recent_files", []) if os.path.exists(p)
+        ]
 
         # state
         self._tabs:       list[EditorTab] = []
@@ -70,7 +75,6 @@ class GravLangIDE:
         self.root.configure(bg=self.theme["BG_BASE"])
         self._build_ui()
         self._bind_global()
-        self.new_tab()
 
     # ── UI BUILD ──────────────────────────────────────────────────────────────
 
@@ -306,6 +310,18 @@ class GravLangIDE:
         # Attach the findbar now that _editor_pane exists
         self._attach_findbar()
 
+        # Welcome & Quick Start Dashboard View
+        self._welcome_view = WelcomeView(
+            self._editor_stack,
+            t,
+            on_new_file=lambda: self.new_tab(),
+            on_open_file=self.open_file,
+            on_open_recent=self.open_file_path,
+            on_load_demo=self.open_file_path,
+        )
+        self._welcome_view.set_recent_files(self._recent_files)
+        self._welcome_view.pack(fill="both", expand=True)
+
     def _build_activity_bar(self):
         t   = self.theme
         bar = self._activity_bar
@@ -327,6 +343,13 @@ class GravLangIDE:
             font=("Segoe UI", 14), cursor="hand2", width=3, bd=0,
             highlightthickness=0, activebackground=t["BG_SURFACE0"])
         info.place(relx=0.5, rely=1.0, anchor="s", y=-10)
+
+    def _jump_to_editor_line(self, line: int):
+        tab = self._active_tab()
+        if tab:
+            tab.editor.mark_set("insert", f"{line}.0")
+            tab.editor.see(f"{line}.0")
+            tab.editor.focus_set()
 
     def _build_bottom_pane(self):
         t = self.theme
@@ -365,18 +388,15 @@ class GravLangIDE:
         self._bottom.pack(side="bottom", fill="x")
         self._bottom.pack_propagate(False)
 
-        # ── Output area (left) ───────────────────────────────────────────────
-        self._out_frame = tk.Frame(self._bottom, bg=t["BG_CRUST"])
-        self._out_frame.pack(side="left", fill="both", expand=True)
+        # ── Multi-Tab Bottom Panel (left) ───────────────────────────────────
+        self._bottom_panel = BottomPanel(self._bottom, t, on_jump_cb=self._jump_to_editor_line)
+        self._bottom_panel.pack(side="left", fill="both", expand=True)
 
-        hdr = tk.Frame(self._out_frame, bg=t["BG_MANTLE"], height=28)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
+        self._output = self._bottom_panel.output_txt
+        self._out_frame = self._bottom_panel.out_frame
 
-        tk.Label(hdr, text="OUTPUT", bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
-                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=8, pady=4)
+        hdr = self._bottom_panel.hdr
 
-        # ── Clear on Run toggle ──────────────────────────────────────────────
         self._clear_on_run = tk.BooleanVar(value=False)
 
         def _toggle_clear_on_run():
@@ -391,7 +411,7 @@ class GravLangIDE:
             bg=t["BG_MANTLE"], fg=t["TEXT_SUB"],
             font=("Segoe UI", 9), cursor="hand2", padx=6,
         )
-        clr_lbl.pack(side="left", pady=4)
+        clr_lbl.pack(side="right", pady=4, padx=4)
         clr_lbl.bind("<Button-1>", lambda e: (
             self._clear_on_run.set(not self._clear_on_run.get()),
             _toggle_clear_on_run(),
@@ -399,9 +419,9 @@ class GravLangIDE:
         clr_lbl.bind("<Enter>", lambda e: clr_lbl.configure(fg=t["BLUE"]))
         clr_lbl.bind("<Leave>", lambda e: clr_lbl.configure(
             fg=t["BLUE"] if self._clear_on_run.get() else t["TEXT_SUB"]))
-        self._clr_lbl = clr_lbl   # keep ref for theme updates
+        self._clr_lbl = clr_lbl
 
-        tk.Button(hdr, text="📋 Copy",  command=self._copy_output,
+        tk.Button(hdr, text="📋 Copy", command=self._copy_output,
             bg=t["BG_MANTLE"], fg=t["TEXT_SUB"], relief="flat",
             font=("Segoe UI", 9), cursor="hand2", bd=0,
             highlightthickness=0).pack(side="right", padx=4, pady=2)
@@ -410,15 +430,7 @@ class GravLangIDE:
             font=("Segoe UI", 9), cursor="hand2", bd=0,
             highlightthickness=0).pack(side="right", pady=2)
 
-        self._output = tk.Text(self._out_frame, bg=t["BG_CRUST"],
-            fg=t["GREEN"], font=("Consolas", 11), relief="flat",
-            state="disabled", wrap="word", bd=0)
-        self._output.pack(fill="both", expand=True, padx=4, pady=4)
-        self._output.tag_configure("error",  foreground=t["RED"])
-        self._output.tag_configure("timing", foreground=t["BLUE"])
-        self._output.tag_configure("sep",    foreground=t["TEXT_SUB"])
-
-        # ── Inline Input Bar (hidden by default) ─────────────────────────────
+        # ── Inline Input Bar (hidden by default inside output tab) ───────────
         self._input_bar = tk.Frame(self._out_frame, bg=t["BG_MANTLE"])
         self._input_prompt_lbl = tk.Label(
             self._input_bar, text="Input:", bg=t["BG_MANTLE"], fg=t["PEACH"],
@@ -481,6 +493,8 @@ class GravLangIDE:
     # ── TAB MANAGEMENT ────────────────────────────────────────────────────────
 
     def new_tab(self, filepath="", content=""):
+        if hasattr(self, "_welcome_view"):
+            self._welcome_view.pack_forget()
         t   = self.theme
         tab = EditorTab(self._editor_stack, t,
                         on_change_cb=self._on_editor_change,
@@ -558,6 +572,9 @@ class GravLangIDE:
         if not (0 <= idx < len(self._tabs)):
             return
 
+        if hasattr(self, "_welcome_view"):
+            self._welcome_view.pack_forget()
+
         t = self.theme
         for i, tab in enumerate(self._tabs):
             tab.frame.pack_forget()
@@ -596,23 +613,25 @@ class GravLangIDE:
         if not (0 <= idx < len(self._tabs)):
             return
 
-        if len(self._tabs) == 1:
-            self._tabs[0].set_content("")
-            self._tabs[0].filepath = ""
-            self._tabs[0].modified = False
-            self._refresh_tab_labels()
-            self._update_title()
-            return
-
         tab = self._tabs[idx]
         if tab.modified:
             ans = messagebox.askyesnocancel("Unsaved", f"Save {tab.name()} before closing?")
             if ans is None: return
             if ans: self.save_file()
+
         tab.frame.destroy()
         self._tabs.pop(idx)
         lbl_data = self._tab_labels.pop(idx)
         lbl_data["frame"].destroy()  # store frame reference instead of fragile .master.master
+
+        if len(self._tabs) == 0:
+            self._active_idx = -1
+            self._update_title()
+            if hasattr(self, "_welcome_view"):
+                self._welcome_view.set_recent_files(self._recent_files)
+                self._welcome_view.pack(fill="both", expand=True)
+            return
+
         new_idx = min(idx, len(self._tabs) - 1)
         self._active_idx = -1
         self.switch_tab(new_idx)
@@ -635,7 +654,38 @@ class GravLangIDE:
             self.open_file_path(path)
 
     def open_file_path(self, path: str):
+        norm_path = os.path.abspath(path)
+        if norm_path in self._recent_files:
+            self._recent_files.remove(norm_path)
+        self._recent_files.insert(0, norm_path)
+        self._recent_files = self._recent_files[:10]
+        self._config["recent_files"] = self._recent_files
+        self._save_config()
+
+        if hasattr(self, "_welcome_view"):
+            self._welcome_view.set_recent_files(self._recent_files)
+            self._welcome_view.pack_forget()
+
         # check if already open
+        for i, tab in enumerate(self._tabs):
+            if tab.filepath == path or tab.filepath == norm_path:
+                self.switch_tab(i)
+                return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+        tab = self._active_tab()
+        if tab and not tab.modified and not tab.get_content().strip():
+            tab.filepath = path
+            tab.set_content(content)
+            self._refresh_tab_labels()
+            self._update_title()
+            self._update_status_file()
+        else:
+            self.new_tab(filepath=path, content=content)
         for i, tab in enumerate(self._tabs):
             if tab.filepath == path:
                 self.switch_tab(i)
@@ -1000,21 +1050,28 @@ class GravLangIDE:
 
 
     def _append_output(self, text: str, tag: str = ""):
-        self._output.configure(state="normal")
-        if tag:
-            self._output.insert("end", text, tag)
+        if hasattr(self, "_bottom_panel"):
+            self._bottom_panel.append_output(text, tag)
         else:
-            self._output.insert("end", text)
-        self._output.configure(state="disabled")
-        self._output.see("end")
+            self._output.configure(state="normal")
+            if tag:
+                self._output.insert("end", text, tag)
+            else:
+                self._output.insert("end", text)
+            self._output.configure(state="disabled")
+            self._output.see("end")
 
     def _clear_output(self):
-        self._output.configure(state="normal")
-        self._output.delete("1.0", "end")
-        self._output.configure(state="disabled")
+        if hasattr(self, "_bottom_panel"):
+            self._bottom_panel.clear_output()
+        else:
+            self._output.configure(state="normal")
+            self._output.delete("1.0", "end")
+            self._output.configure(state="disabled")
 
     def _copy_output(self):
-        content = self._output.get("1.0", "end-1c")
+        txt = self._bottom_panel.output_txt if hasattr(self, "_bottom_panel") else self._output
+        content = txt.get("1.0", "end-1c")
         self.root.clipboard_clear()
         self.root.clipboard_append(content)
 
@@ -1046,6 +1103,10 @@ class GravLangIDE:
     def _on_editor_change(self):
         self._refresh_tab_labels()
         self._update_title()
+        tab = self._active_tab()
+        if tab and hasattr(self, "_bottom_panel"):
+            problems = [("error", line, msg) for line, msg in tab._lint_errors.items()]
+            self._bottom_panel.set_problems(problems)
 
     def _update_title(self):
         tab  = self._active_tab()
@@ -1341,7 +1402,10 @@ class GravLangIDE:
     def _save_config(self):
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump({"theme": self.theme_name}, f)
+                json.dump({
+                    "theme": self.theme_name,
+                    "recent_files": getattr(self, "_recent_files", []),
+                }, f, indent=2)
         except Exception:
             pass
 

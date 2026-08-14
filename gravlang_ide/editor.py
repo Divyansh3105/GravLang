@@ -361,6 +361,9 @@ class EditorTab:
                 pass
             self._lint_errors[error_line] = error_msg
 
+        if hasattr(self, "_on_change") and callable(self._on_change):
+            self._on_change()
+
     def _on_editor_motion(self, event):
         """Show the lint tooltip only when hovering directly over squiggled text."""
         try:
