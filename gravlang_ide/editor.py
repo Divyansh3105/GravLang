@@ -49,6 +49,8 @@ class EditorTab:
         self._on_cursor = on_cursor_cb
         self._autocomplete: AutoCompletePopup = None
         self.breakpoints: set[int] = set()
+        self.paused_line: int | None = None
+        self.folded_blocks: set[int] = set()
         self._frame = tk.Frame(parent_frame, bg=theme["BG_BASE"])
         self._build()
 
@@ -57,12 +59,12 @@ class EditorTab:
         self.container = tk.Frame(self._frame, bg=t["BG_BASE"])
         self.container.pack(fill="both", expand=True)
 
-        # line numbers
-        self.line_frame = tk.Frame(self.container, bg=t["BG_BASE"], width=44)
+        # line numbers & gutter
+        self.line_frame = tk.Frame(self.container, bg=t["BG_BASE"], width=58)
         self.line_frame.pack(side="left", fill="y")
         self.line_frame.pack_propagate(False)
         self.ln_canvas = tk.Canvas(self.line_frame, bg=t["BG_BASE"],
-                                   width=44, highlightthickness=0, cursor="hand2")
+                                   width=58, highlightthickness=0, cursor="hand2")
         self.ln_canvas.pack(fill="both", expand=True)
         self.ln_canvas.bind("<Button-1>", self._on_gutter_click)
 
@@ -125,6 +127,7 @@ class EditorTab:
         self.editor.tag_configure("augop",          foreground=t["MAUVE"])
         self.editor.tag_configure("active_ln",      background=t["BG_SURFACE0"])
         self.editor.tag_configure("step_highlight", background=t["LAVENDER"], foreground=t["BG_BASE"])
+        self.editor.tag_configure("folded_hidden",  elide=True)
         self.editor.tag_configure("match_hl",       background=t["PEACH"], foreground="#1e1e2e")
         self.editor.tag_configure("match_cur",      background=t["PEACH"], foreground="#1e1e2e",
                                   font=("Consolas", 12, "bold"))
@@ -405,12 +408,83 @@ class EditorTab:
         cur_row = ed.index("insert").split(".")[0]
         ed.tag_add("active_ln", f"{cur_row}.0", f"{cur_row}.end+1c")
 
+    def _find_fold_ranges(self) -> dict[int, int]:
+        """Scan editor content for matching block braces { ... } spanning multiple lines."""
+        content = self.get_content()
+        lines = content.splitlines()
+        stack = []
+        ranges = {}
+        in_string = False
+        string_char = ""
+        escape = False
+
+        for row_idx, line in enumerate(lines, start=1):
+            i = 0
+            while i < len(line):
+                ch = line[i]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == string_char:
+                        in_string = False
+                elif ch == "#":
+                    break  # comment rest of line
+                elif ch in ('"', "'"):
+                    in_string = True
+                    string_char = ch
+                elif ch == "{":
+                    stack.append(row_idx)
+                elif ch == "}":
+                    if stack:
+                        start_line = stack.pop()
+                        if row_idx > start_line:
+                            ranges[start_line] = row_idx
+                i += 1
+        return ranges
+
+    def toggle_fold(self, start_line: int) -> bool:
+        ranges = self._find_fold_ranges()
+        if start_line not in ranges:
+            return False
+        end_line = ranges[start_line]
+        ed = self.editor
+
+        start_idx = f"{start_line + 1}.0"
+        end_idx = f"{end_line}.end+1c"
+
+        if start_line in self.folded_blocks:
+            # Unfold / Expand
+            ed.tag_remove("folded_hidden", start_idx, end_idx)
+            self.folded_blocks.remove(start_line)
+            is_folded = False
+        else:
+            # Fold / Collapse
+            ed.tag_add("folded_hidden", start_idx, end_idx)
+            self.folded_blocks.add(start_line)
+            is_folded = True
+
+        self._update_line_numbers()
+        return is_folded
+
+    def set_paused_line(self, line: int | None):
+        """Set or clear the execution pointer arrow line."""
+        self.paused_line = line
+        self._update_line_numbers()
+
     def _on_gutter_click(self, event):
         try:
             idx = self.editor.index(f"@0,{event.y}")
             line = int(idx.split(".")[0])
             total_lines = int(self.editor.index("end-1c").split(".")[0])
-            if 1 <= line <= total_lines:
+            if not (1 <= line <= total_lines):
+                return
+
+            fold_ranges = self._find_fold_ranges()
+            if event.x > 16 and line in fold_ranges:
+                self.toggle_fold(line)
+            else:
                 self.toggle_breakpoint(line)
         except Exception:
             pass
@@ -436,25 +510,72 @@ class EditorTab:
         cur_row = self.editor.index("insert").split(".")[0]
         red_color = t.get("RED", "#f38ba8")
         border_color = t.get("PEACH", "#f9e2af")
+        yellow_color = t.get("YELLOW", "#f9e2af")
+        blue_color = t.get("BLUE", "#89b4fa")
+        text_sub = t.get("TEXT_SUB", "#6c7086")
+
+        fold_ranges = self._find_fold_ranges()
+
+        # Draw vertical gutter divider line on right edge
+        canvas_h = self.ln_canvas.winfo_height() or 800
+        self.ln_canvas.create_line(57, 0, 57, canvas_h, fill=t.get("BG_SURFACE0", "#313244"))
+
         while True:
             dline = self.editor.dlineinfo(i)
             if dline is None: break
             _, dy, _, dh, _ = dline
             linenum = i.split(".")[0]
             line_int = int(linenum)
-            color = t["TEXT_MAIN"] if linenum == cur_row else t["TEXT_SUB"]
+            cy = dy + dh // 2
+            is_active = (linenum == cur_row)
 
-            # Draw red dot if line has a breakpoint
+            # 1. Breakpoint Dot (x=8)
             if line_int in self.breakpoints:
-                cy = dy + dh // 2
                 self.ln_canvas.create_oval(
-                    4, cy - 5, 14, cy + 5,
+                    4, cy - 4, 12, cy + 4,
                     fill=red_color, outline=border_color, width=1
                 )
 
-            self.ln_canvas.create_text(38, dy + dh // 2,
+            # 2. Folding Chevron (x=20)
+            if line_int in fold_ranges:
+                if line_int in self.folded_blocks:
+                    # Right arrow ▶ (collapsed)
+                    self.ln_canvas.create_polygon(
+                        17, cy - 4, 23, cy, 17, cy + 4,
+                        fill=text_sub, outline=""
+                    )
+                else:
+                    # Down arrow ▼ (expanded)
+                    self.ln_canvas.create_polygon(
+                        16, cy - 3, 24, cy - 3, 20, cy + 3,
+                        fill=text_sub, outline=""
+                    )
+
+            # 3. Execution Pointer Arrow ➔ (x=30)
+            if self.paused_line is not None and line_int == self.paused_line:
+                self.ln_canvas.create_polygon(
+                    26, cy - 5, 34, cy, 26, cy + 5,
+                    fill=yellow_color, outline=border_color, width=1
+                )
+
+            # 4. Active Line Accent Bar (x=54..56) & Line Number Text (x=51)
+            if is_active:
+                color = t.get("TEXT_MAIN", "#cdd6f4")
+                font = ("Consolas", 11, "bold")
+                self.ln_canvas.create_rectangle(
+                    54, dy + 2, 57, dy + dh - 2,
+                    fill=blue_color, outline=""
+                )
+            else:
+                color = text_sub
+                font = ("Consolas", 11)
+
+            self.ln_canvas.create_text(
+                51, cy,
                 text=linenum, anchor="e",
-                fill=color, font=("Consolas", 11))
+                fill=color, font=font
+            )
+
             next_i = self.editor.index(f"{i}+1line")
             if next_i == i: break
             i = next_i

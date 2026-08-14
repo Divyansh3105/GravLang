@@ -841,6 +841,7 @@ class GravLangIDE:
                             tab.editor.tag_remove("step_highlight", "1.0", "end")
                             tab.editor.tag_add("step_highlight", f"{line}.0", f"{line}.end")
                             tab.editor.see(f"{line}.0")
+                            tab.set_paused_line(line)
                         status_msg = f"⏸ Paused at line {line} (Breakpoint)" if is_bp else f"⏸ Paused at line {line}"
                         if hasattr(self, "_status_run"):
                             self._status_run.configure(text=status_msg)
@@ -970,6 +971,9 @@ class GravLangIDE:
         """Signal the running thread to stop; show cancellation message."""
         self._cancel_flag = True
         self._step_event.set()
+        tab = self._active_tab()
+        if tab:
+            tab.set_paused_line(None)
         if hasattr(self, "_input_bar"):
             self.root.after(0, lambda: self._input_bar.pack_forget())
         if getattr(self, "_active_input_event", None):
@@ -981,6 +985,7 @@ class GravLangIDE:
         tab = self._active_tab()
         if tab:
             tab.editor.tag_remove("step_highlight", "1.0", "end")
+            tab.set_paused_line(None)
         # NOTE: lines already streamed live by capture(); no need to replay them.
         for err in errors:
             self._append_output(f"❌ {err}\n", "error")
