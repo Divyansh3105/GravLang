@@ -214,8 +214,20 @@ class WelcomeView(tk.Frame):
                 if self.on_open_recent:
                     self.on_open_recent(p)
 
+            def _enter(e, frame=btn, t_lbl=top, s_lbl=sub):
+                frame.configure(bg=t["BG_SURFACE1"])
+                t_lbl.configure(bg=t["BG_SURFACE1"])
+                s_lbl.configure(bg=t["BG_SURFACE1"])
+
+            def _leave(e, frame=btn, t_lbl=top, s_lbl=sub):
+                frame.configure(bg=t["BG_SURFACE0"])
+                t_lbl.configure(bg=t["BG_SURFACE0"])
+                s_lbl.configure(bg=t["BG_SURFACE0"])
+
             for w in (btn, top, sub):
                 w.bind("<Button-1>", _click)
+                w.bind("<Enter>", _enter)
+                w.bind("<Leave>", _leave)
 
     def apply_theme(self, theme: dict):
         self.theme = theme
