@@ -221,6 +221,22 @@ mkdocs serve
 
 ---
 
+## 👨‍💻 Authors
+
+### Divyansh Garg
+
+🌐 Portfolio: divyansh3105.github.io/Portfolio  
+💼 LinkedIn: linkedin.com/in/divyanshgarg3105  
+💻 GitHub: @Divyansh3105
+
+### Utkarsh Negi
+
+💼 LinkedIn: linkedin.com/in/negiutkarsh
+
+💻 GitHub: @UtkarshNegi01
+
+---
+
 ## 📜 License
 
 This project is licensed under the [MIT License](LICENSE).
