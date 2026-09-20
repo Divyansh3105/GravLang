@@ -232,6 +232,7 @@ mkdocs serve
 ### Utkarsh Negi
 
 💼 LinkedIn: linkedin.com/in/negiutkarsh
+
 💻 GitHub: @UtkarshNegi01
 
 ---
