@@ -2,7 +2,7 @@
   <h1>GravLang</h1>
   <p><strong>A lightweight, multi-paradigm dynamic programming language with an AST interpreter & custom IDE.</strong></p>
 
-[![Python Version](https://img.shields.io/badge/python-3.8+-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-285%20passed-success.svg?style=flat)]()
 [![Type Checked](https://img.shields.io/badge/pyright-clean-blue.svg?style=flat)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](LICENSE)
@@ -84,7 +84,7 @@ The IDE includes several ready-to-run demo applications located in `demos/`:
 
 ### Prerequisites
 
-- **Python 3.8+** (Python 3.10+ recommended)
+- **Python 3.10+**
 
 ### Installation
 
