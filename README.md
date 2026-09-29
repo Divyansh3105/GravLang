@@ -3,7 +3,7 @@
   <p><strong>A lightweight, multi-paradigm dynamic programming language with an AST interpreter & custom IDE.</strong></p>
 
 [![Python Version](https://img.shields.io/badge/python-3.10+-3776AB.svg?style=flat&logo=python&logoColor=white)](https://www.python.org/downloads/)
-[![Tests](https://img.shields.io/badge/tests-285%20passed-success.svg?style=flat)]()
+[![CI](https://github.com/Divyansh3105/GravLang/actions/workflows/ci.yml/badge.svg)](https://github.com/Divyansh3105/GravLang/actions/workflows/ci.yml)
 [![Type Checked](https://img.shields.io/badge/pyright-clean-blue.svg?style=flat)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat)](LICENSE)
 
@@ -139,7 +139,7 @@ python -m gravlang.core.formatter demos/todo_app.grav
 
 ### Running Tests
 
-Run the complete test suite (285 tests):
+Run the complete test suite:
 ```bash
 pytest
 ```
