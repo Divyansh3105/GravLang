@@ -548,3 +548,11 @@ class TestScope:
     def test_function_does_not_pollute_outer(self):
         src = "let x = 1; func f() { let x = 99; } f(); print(x);"
         assert run_grav(src) == ["1"]
+
+
+# 28 String concatenation uses GravLang spelling
+class TestConcat:
+    def test_bool_and_null(self):
+        assert run_grav('print("x" + true + null);') == ["xtruenull"]
+    def test_aug_assign(self):
+        assert run_grav('let s = "a"; s += false; print(s);') == ["afalse"]

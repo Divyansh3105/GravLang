@@ -10,7 +10,7 @@ import os
 import sys
 from . import ast_nodes as ast
 from .environment import Environment
-from .grav_builtins import register_builtins
+from .grav_builtins import register_builtins, _builtin_toString
 from .errors import GravLangRuntimeError, BreakSignal, ContinueSignal
 from .gravlang_class import GravLangClass, GravLangInstance
 
@@ -163,7 +163,7 @@ class Interpreter:
         new_val = self._exec(node.value, env)
         if node.op == "+":
             if isinstance(current, str) or isinstance(new_val, str):
-                result = str(current) + str(new_val)
+                result = _builtin_toString(current) + _builtin_toString(new_val)
             else:
                 result = current + new_val
         elif node.op == "-":
@@ -502,7 +502,7 @@ class Interpreter:
             match node.op:
                 case "+":
                     if isinstance(left, str) or isinstance(right, str):
-                        return str(left) + str(right)
+                        return _builtin_toString(left) + _builtin_toString(right)
                     return left + right
                 case "-":  return left - right
                 case "*":  return left * right
