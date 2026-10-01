@@ -11,7 +11,7 @@ import sys
 from . import ast_nodes as ast
 from .environment import Environment
 from .grav_builtins import register_builtins, _builtin_toString
-from .errors import GravLangRuntimeError, BreakSignal, ContinueSignal
+from .errors import GravLangError, GravLangRuntimeError, BreakSignal, ContinueSignal
 from .gravlang_class import GravLangClass, GravLangInstance
 
 # Raise Python's own recursion limit so our depth check always fires first
@@ -417,7 +417,7 @@ class Interpreter:
                 self._exec(node.try_body, env)
             except (ReturnSignal, BreakSignal, ContinueSignal):
                 raise
-            except Exception as e:
+            except (GravLangError, RecursionError) as e:
                 if node.catch_body is not None:
                     catch_env = Environment(parent=env)
                     if node.catch_var:
