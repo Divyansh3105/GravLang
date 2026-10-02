@@ -565,3 +565,10 @@ class TestErrorReporting:
         with pytest.raises(ParseError) as exc:
             run_grav('print(1);\nprint(2)\n')
         assert exc.value.line == 2
+    def test_input_at_eof_is_a_grav_error(self, monkeypatch):
+        from gravlang.core.errors import GravLangRuntimeError
+        def _eof(prompt=""):
+            raise EOFError
+        monkeypatch.setattr("builtins.input", _eof)
+        with pytest.raises(GravLangRuntimeError, match="end of input"):
+            run_grav('let x = input("? ");')

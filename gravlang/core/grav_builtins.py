@@ -22,7 +22,10 @@ def _builtin_print(*args):
 
 def _builtin_input(prompt=""):
     """input(prompt) → reads a line from stdin."""
-    return input(prompt)
+    try:
+        return input(prompt)
+    except EOFError:
+        raise ValueError("input(): reached end of input") from None
 
 
 # ── Introspection ────────────────────────────────────────────────────
