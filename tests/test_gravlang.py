@@ -556,3 +556,12 @@ class TestConcat:
         assert run_grav('print("x" + true + null);') == ["xtruenull"]
     def test_aug_assign(self):
         assert run_grav('let s = "a"; s += false; print(s);') == ["afalse"]
+
+
+# 29 Error reporting
+class TestErrorReporting:
+    def test_missing_semi_reports_its_own_line(self):
+        from gravlang.core.errors import ParseError
+        with pytest.raises(ParseError) as exc:
+            run_grav('print(1);\nprint(2)\n')
+        assert exc.value.line == 2

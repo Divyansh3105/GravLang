@@ -57,7 +57,9 @@ class Parser:
         tok = self._current()
         if tok.type != ttype:
             msg = msg or f"Expected {ttype}, got {tok.type} ({tok.value!r})"
-            raise ParseError(msg, tok.line)
+            # A missing token belongs after the previous one, not on the next line/EOF.
+            line = self.tokens[self.pos - 1].line if self.pos > 0 else tok.line
+            raise ParseError(msg, line)
         return self._advance()
 
     # ── entry point ──────────────────────────────────────────────────
