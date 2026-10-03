@@ -572,3 +572,13 @@ class TestErrorReporting:
         monkeypatch.setattr("builtins.input", _eof)
         with pytest.raises(GravLangRuntimeError, match="end of input"):
             run_grav('let x = input("? ");')
+    def test_execution_stopped_bypasses_catch(self):
+        from gravlang.core.errors import ExecutionStopped
+        from gravlang.core.lexer import Lexer
+        from gravlang.core.parser import Parser
+        from gravlang.core.interpreter import Interpreter
+        def _stop(line, env):
+            raise ExecutionStopped()
+        src = 'try { let x = 1; } catch (e) { print("swallowed"); }'
+        with pytest.raises(ExecutionStopped):
+            Interpreter(on_step=_stop, print_fn=lambda *a: None).interpret(Parser(Lexer(src).tokenize()).parse())

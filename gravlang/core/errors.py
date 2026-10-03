@@ -53,3 +53,8 @@ class BreakSignal(Exception):
 class ContinueSignal(Exception):
     """Raised by 'continue' to skip to the next loop iteration."""
     pass
+
+
+class ExecutionStopped(Exception):
+    """Raised by the IDE to abort a run; not a GravLangError, so user catch blocks can't swallow it."""
+    pass

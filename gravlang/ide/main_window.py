@@ -847,6 +847,9 @@ class GravLangIDE:
 
             self.root.after(0, _show_inline_input)
             event.wait()          # block run-thread until input submitted
+            if self._cancel_flag:
+                from ..core.errors import ExecutionStopped
+                raise ExecutionStopped()
             return result_holder[0]
 
         # Whether the stages window is open — captured for thread closure
@@ -859,6 +862,7 @@ class GravLangIDE:
             self.root.after(0, lambda s=stg: s.set_status("⏳  Compiling…"))
 
         def _run_in_thread():
+            from ..core.errors import ExecutionStopped
             lex_tokens = []
             ast_tree   = None
             trace_lines: list[tuple[str, str]] = []
@@ -885,6 +889,8 @@ class GravLangIDE:
                 import dataclasses
 
                 def _on_step_hook(line, env):
+                    if self._cancel_flag:
+                        raise ExecutionStopped()
                     active_tab = self._active_tab()
                     is_bp = active_tab and (line in active_tab.breakpoints)
 
@@ -895,10 +901,7 @@ class GravLangIDE:
                         return
                     if line == self._last_paused_line:
                         return
-                    if self._cancel_flag:
-                        from ..core.errors import GravLangError
-                        raise GravLangError("Execution stopped")
-                    
+
                     self._last_paused_line = line
                     store = dict(env._store)
                     
@@ -918,8 +921,7 @@ class GravLangIDE:
                     self._step_event.clear()
                     self._step_event.wait()
                     if self._cancel_flag:
-                        from ..core.errors import GravLangError
-                        raise GravLangError("Execution stopped")
+                        raise ExecutionStopped()
 
                 if stages_ref is not None:
                     # Wrap Interpreter to intercept variable declarations/assignments
@@ -1002,6 +1004,11 @@ class GravLangIDE:
                         f"{len(tk)-1} tokens  ·  {len(t)} traced events"))
 
                 self.root.after(0, lambda: self._finish_run(output_lines, [], elapsed, store_out))
+
+            except ExecutionStopped:
+                elapsed = time.time() - t_start
+                output_lines = list(lines)
+                self.root.after(0, lambda: self._finish_run(output_lines, ["Execution stopped"], elapsed, {}))
 
             except GravLangError as e:
                 elapsed = time.time() - t_start
