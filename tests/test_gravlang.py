@@ -582,3 +582,22 @@ class TestErrorReporting:
         src = 'try { let x = 1; } catch (e) { print("swallowed"); }'
         with pytest.raises(ExecutionStopped):
             Interpreter(on_step=_stop, print_fn=lambda *a: None).interpret(Parser(Lexer(src).tokenize()).parse())
+
+
+# 30 Interpreter internals
+class TestInterpreterInternals:
+    @staticmethod
+    def _parse(src):
+        from gravlang.core.lexer import Lexer
+        from gravlang.core.parser import Parser
+        return Parser(Lexer(src).tokenize()).parse()
+
+    def test_caught_error_has_no_kind_prefix(self):
+        src = 'let a = []; try { print(a[5]); } catch (e) { print(e); }'
+        out = run_grav(src)
+        assert out and "out of range" in out[0].lower() and not out[0].startswith("Runtime Error")
+    def test_uncaught_error_keeps_kind_prefix(self):
+        from gravlang.core.errors import GravLangRuntimeError
+        with pytest.raises(GravLangRuntimeError) as exc:
+            run_grav("print(nope);")
+        assert "Runtime Error: Undefined variable" in str(exc.value)

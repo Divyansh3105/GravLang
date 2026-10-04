@@ -421,7 +421,10 @@ class Interpreter:
                 if node.catch_body is not None:
                     catch_env = Environment(parent=env)
                     if node.catch_var:
-                        err_val = getattr(e, "value", getattr(e, "message", str(e)))
+                        if isinstance(e, RecursionError):
+                            err_val = "Stack overflow"
+                        else:
+                            err_val = getattr(e, "value", e.message)
                         catch_env.set(node.catch_var, err_val)
                     self._exec(node.catch_body, catch_env)
                 else:

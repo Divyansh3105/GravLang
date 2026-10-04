@@ -9,6 +9,8 @@ where the error was detected, and optionally the source code of that line.
 class GravLangError(Exception):
     """Base exception for every error raised by the GravLang toolchain."""
 
+    kind = ""  # display prefix, e.g. "Runtime Error"; kept out of .message
+
     def __init__(self, message: str, line: int | None = None, source_line: str = ""):
         self.message = message
         self.line = line
@@ -16,7 +18,8 @@ class GravLangError(Exception):
         super().__init__(self._format())
 
     def _format(self) -> str:
-        base = f"[Line {self.line}] {self.message}" if self.line else self.message
+        msg = f"{self.kind}: {self.message}" if self.kind else self.message
+        base = f"[Line {self.line}] {msg}" if self.line else msg
         if self.source_line:
             base += f"\n    {self.source_line}"
         return base
@@ -25,22 +28,19 @@ class GravLangError(Exception):
 class LexerError(GravLangError):
     """Raised by the lexer when it encounters an illegal character or token."""
 
-    def __init__(self, message: str, line: int | None = None, source_line: str = ""):
-        super().__init__(f"Lexer Error: {message}", line, source_line)
+    kind = "Lexer Error"
 
 
 class ParseError(GravLangError):
     """Raised by the parser on a syntax error."""
 
-    def __init__(self, message: str, line: int | None = None, source_line: str = ""):
-        super().__init__(f"Parse Error: {message}", line, source_line)
+    kind = "Parse Error"
 
 
 class GravLangRuntimeError(GravLangError):
     """Raised by the interpreter at runtime."""
 
-    def __init__(self, message: str, line: int | None = None, source_line: str = ""):
-        super().__init__(f"Runtime Error: {message}", line, source_line)
+    kind = "Runtime Error"
 
 
 # ── Flow-control signals (NOT errors — never shown to users) ────────
