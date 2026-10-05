@@ -601,3 +601,14 @@ class TestInterpreterInternals:
         with pytest.raises(GravLangRuntimeError) as exc:
             run_grav("print(nope);")
         assert "Runtime Error: Undefined variable" in str(exc.value)
+    def test_visitor_patched_after_init_is_used(self):
+        # The IDE's trace view wraps visitors on the instance after construction.
+        from gravlang.core.interpreter import Interpreter
+        interp = Interpreter(print_fn=lambda *a: None)
+        seen, orig = [], interp._visit_VarDecl
+        def traced(node, env):
+            seen.append(node.name)
+            return orig(node, env)
+        interp._visit_VarDecl = traced
+        interp.interpret(self._parse("let x = 1; let y = 2;"))
+        assert seen == ["x", "y"]

@@ -8,6 +8,7 @@ Uses the visitor pattern: ``visit(node)`` dispatches to
 from __future__ import annotations
 import os
 import sys
+from typing import Callable
 from . import ast_nodes as ast
 from .environment import Environment
 from .grav_builtins import register_builtins, _builtin_toString
@@ -16,6 +17,15 @@ from .gravlang_class import GravLangClass, GravLangInstance
 
 # Raise Python's own recursion limit so our depth check always fires first
 sys.setrecursionlimit(5000)
+
+# Statement-like nodes that trigger the debugger's on_step hook
+_STEP_NODES = frozenset({
+    "VarDecl", "Assign", "AugAssign", "IfStmt", "WhileStmt",
+    "ForStmt", "ForInStmt", "FuncDecl", "ClassDecl",
+    "ReturnStmt", "BreakStmt", "ContinueStmt", "ImportStmt",
+    "TryCatchStmt", "ThrowStmt", "FuncCall", "MethodCall",
+    "ArrayAssign", "DictAssign", "AttributeSet",
+})
 
 
 # ── Sentinel for function returns ────────────────────────────────────
@@ -76,6 +86,10 @@ class Interpreter:
         self.global_env = Environment()
         register_builtins(self.global_env)
 
+        # node class → visitor; filled lazily so visitors patched onto the
+        # instance after construction (IDE tracing) are still picked up
+        self._visitors: dict[type, Callable] = {}
+
         # Source lines for error messages
         self._source_lines = source.splitlines() if source else []
 
@@ -115,20 +129,16 @@ class Interpreter:
     # ── dispatch ─────────────────────────────────────────────────────
 
     def _exec(self, node, env: Environment):
-        if self._on_step and getattr(node, 'line', None):
-            if type(node).__name__ in {
-                "VarDecl", "Assign", "AugAssign", "IfStmt", "WhileStmt", 
-                "ForStmt", "ForInStmt", "FuncDecl", "ClassDecl", 
-                "ReturnStmt", "BreakStmt", "ContinueStmt", "ImportStmt", 
-                "TryCatchStmt", "ThrowStmt", "FuncCall", "MethodCall",
-                "ArrayAssign", "DictAssign", "AttributeSet"
-            }:
-                self._on_step(node.line, env)
+        cls = type(node)
+        if self._on_step and cls.__name__ in _STEP_NODES and getattr(node, 'line', None):
+            self._on_step(node.line, env)
 
-        method_name = f"_visit_{type(node).__name__}"
-        visitor = getattr(self, method_name, None)
+        visitor = self._visitors.get(cls)
         if visitor is None:
-            raise GravLangRuntimeError(f"Unknown AST node: {type(node).__name__}")
+            visitor = getattr(self, f"_visit_{cls.__name__}", None)
+            if visitor is None:
+                raise GravLangRuntimeError(f"Unknown AST node: {cls.__name__}")
+            self._visitors[cls] = visitor
         return visitor(node, env)
 
     # ── statements ───────────────────────────────────────────────────
