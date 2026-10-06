@@ -252,9 +252,11 @@ class Interpreter:
 
     def _visit_ForInStmt(self, node: ast.ForInStmt, env: Environment):
         iterable = self._exec(node.iterable, env)
-        if not isinstance(iterable, list):
+        if isinstance(iterable, dict):
+            iterable = list(iterable)  # keys; snapshot so the body may modify the dict
+        elif not isinstance(iterable, (list, str)):
             raise GravLangRuntimeError(
-                "for...in loop requires an array", node.line,
+                "for...in loop requires an array, string, or dict", node.line,
                 self._get_source_line(node.line),
             )
         broke = False

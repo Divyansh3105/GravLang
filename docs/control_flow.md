@@ -50,12 +50,21 @@ for (let i = 0; i < 5; i += 1) {
 
 ### For-In Loop
 
-Iterate over an array (iterable):
+Iterate over an array, the characters of a string, or the keys of a dict:
 
 ```js
 let arr = [10, 20, 30];
 for (item in arr) {
     print(item);
+}
+
+for (ch in "abc") {
+    print(ch);
+}
+
+let ages = {"ann": 31, "bob": 27};
+for (name in ages) {
+    print(name + ": " + ages[name]);
 }
 ```
 

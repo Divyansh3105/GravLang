@@ -153,9 +153,17 @@ class TestForInLoop:
         assert run_grav(src) == ["15"]
     def test_empty_array(self):
         assert run_grav("let a = []; for (x in a) { print(x); }") == []
-    def test_non_array_raises(self):
+    def test_non_iterable_raises(self):
         with pytest.raises(GravLangError, match="requires an array"):
-            run_grav('for (x in "hello") { print(x); }')
+            run_grav('for (x in 42) { print(x); }')
+    def test_string_chars(self):
+        assert run_grav('for (c in "hi") { print(c); }') == ["h", "i"]
+    def test_dict_keys(self):
+        src = 'let d = {"a": 1, "b": 2}; for (k in d) { print(k + "=" + d[k]); }'
+        assert run_grav(src) == ["a=1", "b=2"]
+    def test_dict_modified_in_body(self):
+        src = 'let d = {"a": 1}; for (k in d) { d["z"] = 0; } print(len(d));'
+        assert run_grav(src) == ["2"]
 
 
 # 08 Functions
