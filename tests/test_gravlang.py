@@ -612,3 +612,9 @@ class TestInterpreterInternals:
         interp._visit_VarDecl = traced
         interp.interpret(self._parse("let x = 1; let y = 2;"))
         assert seen == ["x", "y"]
+    def test_import_does_not_change_recursion_limit(self):
+        import subprocess
+        code = ("import sys; before = sys.getrecursionlimit(); "
+                "import gravlang.core.interpreter; print(sys.getrecursionlimit() == before)")
+        out = subprocess.run([sys.executable, "-c", code], cwd=_ROOT, capture_output=True, text=True)
+        assert out.stdout.strip() == "True", out.stderr

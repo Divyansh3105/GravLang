@@ -15,8 +15,8 @@ from .grav_builtins import register_builtins, _builtin_toString
 from .errors import GravLangError, GravLangRuntimeError, BreakSignal, ContinueSignal
 from .gravlang_class import GravLangClass, GravLangInstance
 
-# Raise Python's own recursion limit so our depth check always fires first
-sys.setrecursionlimit(5000)
+# Python recursion limit needed so our own call-depth check always fires first
+_PY_RECURSION_LIMIT = 5000
 
 # Statement-like nodes that trigger the debugger's on_step hook
 _STEP_NODES = frozenset({
@@ -83,6 +83,9 @@ class Interpreter:
             Shared set of already-imported absolute paths.  Passed down through
             child interpreters to detect circular imports.
         """
+        if sys.getrecursionlimit() < _PY_RECURSION_LIMIT:
+            sys.setrecursionlimit(_PY_RECURSION_LIMIT)
+
         self.global_env = Environment()
         register_builtins(self.global_env)
 
