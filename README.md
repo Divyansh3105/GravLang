@@ -132,9 +132,9 @@ gravlang demos/snake_game.grav
 
 ### Running the Code Formatter
 
-Format GravLang code files directly:
+Format GravLang code files directly (prints to stdout; `-w` rewrites in place, `--check` exits 1 if unformatted):
 ```bash
-python -m gravlang.core.formatter demos/todo_app.grav
+python -m gravlang fmt demos/todo_app.grav
 ```
 
 ### Running Tests

@@ -5,6 +5,7 @@ Usage:
     python -m gravlang                   → Launch GUI IDE
     python -m gravlang --repl            → Launch interactive REPL
     python -m gravlang program.grav      → Run program headlessly
+    python -m gravlang fmt program.grav  → Format a file (see fmt --help)
 """
 
 import sys
@@ -97,6 +98,9 @@ def main():
     if len(sys.argv) > 1:
         if sys.argv[1] == "--repl":
             repl()
+        elif sys.argv[1] == "fmt":
+            from .core.formatter import _cli
+            _cli(sys.argv[2:])
         else:
             run_file(sys.argv[1])
     else:

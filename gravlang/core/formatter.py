@@ -574,7 +574,7 @@ def format_file(path: str, *, indent_width: int = 4) -> str:
 
 # ── CLI entry point ──────────────────────────────────────────────────────────
 
-def _cli() -> None:
+def _cli(argv: list[str] | None = None) -> None:
     import argparse
 
     ap = argparse.ArgumentParser(
@@ -605,7 +605,7 @@ def _cli() -> None:
         action="store_true",
         help="Exit with code 1 if the file is not already formatted (dry-run)",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     try:
         with open(args.file, encoding="utf-8") as fh:
