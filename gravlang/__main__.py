@@ -8,6 +8,7 @@ Usage:
     python -m gravlang fmt program.grav  → Format a file (see fmt --help)
 """
 
+import io
 import sys
 import os
 
@@ -93,7 +94,7 @@ def repl() -> None:
 def main():
     # Legacy Windows consoles (cp1252) can't encode '❌'; degrade instead of crashing.
     for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
+        if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(errors="replace")
     if len(sys.argv) > 1:
         if sys.argv[1] == "--repl":
