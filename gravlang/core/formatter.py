@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import os
 import sys
+from bisect import bisect_right
+from decimal import Decimal
 
 # Allow running as a standalone script from the project root
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -80,6 +82,10 @@ def _fmt_literal(value: object) -> str:
     if isinstance(value, float):
         # Preserve at least one decimal place so it stays a float literal
         s = repr(value)
+        if "e" in s or "E" in s:
+            s = format(Decimal(s), "f")
+        if "." not in s:
+            s += ".0"
         return s
     if isinstance(value, str):
         # Re-escape the string for round-trip safety
@@ -110,17 +116,56 @@ class Formatter:
         self._indent_width = indent_width
         self._level = 0         # current indentation depth
         self._lines: list[str] = []   # accumulated output lines
+        self._src: list[int | None] = []  # source line each output line is anchored to
+        self._anchored: set[int] = set()
+        self._cur: int | None = None  # source line of the statement being emitted
 
     # ── public API ──────────────────────────────────────────────────────
 
-    def format(self, tree: ast.Program) -> str:
-        """Walk *tree* and return the formatted source as a string."""
+    def format(self, tree: ast.Program, comments=()) -> str:
+        """Walk *tree* and return the formatted source as a string.
+
+        *comments* is the lexer's ``(line, text, trailing)`` list; each comment
+        is re-attached to the output line of the statement it sat on / before.
+        """
         self._lines = []
+        self._src = []
+        self._anchored = set()
+        self._cur = None
         self._level = 0
         self._fmt_program(tree)
+        lines = self._merge_comments(comments)
         # Guarantee single trailing newline, strip trailing blank lines
-        result = "\n".join(self._lines).rstrip() + "\n"
+        result = "\n".join(lines).rstrip() + "\n"
         return result
+
+    def _merge_comments(self, comments) -> list[str]:
+        if not comments:
+            return self._lines
+        anchor = {s: i for i, s in enumerate(self._src) if s is not None}
+        keys = sorted(anchor)
+        before: dict[int, list[str]] = {}
+        trail: dict[int, list[str]] = {}
+        tail: list[str] = []
+        for ln, text, trailing in comments:
+            text = text.rstrip()
+            if trailing:
+                k = bisect_right(keys, ln) - 1
+                if k >= 0:
+                    trail.setdefault(anchor[keys[k]], []).append(text)
+                    continue
+            k = bisect_right(keys, ln)  # first anchored statement after the comment
+            if k < len(keys):
+                before.setdefault(anchor[keys[k]], []).append(text)
+            else:
+                tail.append(text)
+        out: list[str] = []
+        for i, line in enumerate(self._lines):
+            indent = line[:len(line) - len(line.lstrip())]
+            out.extend(indent + c for c in before.get(i, ()))
+            out.append(line + "".join("  " + c for c in trail.get(i, ())))
+        out.extend(tail)
+        return out
 
     # ── indentation helpers ─────────────────────────────────────────────
 
@@ -129,10 +174,16 @@ class Formatter:
 
     def _emit(self, text: str) -> None:
         """Append a line at the current indentation level."""
+        src = None
+        if self._cur is not None and self._cur not in self._anchored:
+            src = self._cur
+            self._anchored.add(src)
         self._lines.append(f"{self._indent()}{text}")
+        self._src.append(src)
 
     def _blank(self) -> None:
         self._lines.append("")
+        self._src.append(None)
 
     # ── program ─────────────────────────────────────────────────────────
 
@@ -153,11 +204,16 @@ class Formatter:
     def _fmt_stmt(self, node) -> None:
         t = type(node).__name__
         method = getattr(self, f"_fmt_{t}", None)
-        if method is None:
-            # Fallback: try to emit as expression statement
-            self._emit(f"{self._fmt_expr(node)};")
-            return
-        method(node)
+        prev = self._cur
+        self._cur = getattr(node, "line", None) or prev
+        try:
+            if method is None:
+                # Fallback: try to emit as expression statement
+                self._emit(f"{self._fmt_expr(node)};")
+            else:
+                method(node)
+        finally:
+            self._cur = prev
 
     # ── statements ──────────────────────────────────────────────────────
 
@@ -340,7 +396,7 @@ class Formatter:
         for i, method in enumerate(node.methods):
             if i > 0:
                 self._blank()  # blank line between methods
-            self._fmt_FuncDecl(method)
+            self._fmt_stmt(method)
         self._level -= 1
         self._emit("}")
 
@@ -362,13 +418,13 @@ class Formatter:
         self._emit(f"{self._fmt_expr(node)};")
 
     def _fmt_ArrayAssign(self, node: ast.ArrayAssign) -> None:
-        arr  = self._fmt_expr(node.array)
+        arr  = self._postfix_obj(node.array)
         idx  = self._fmt_expr(node.index)
         val  = self._fmt_expr(node.value)
         self._emit(f"{arr}[{idx}] = {val};")
 
     def _fmt_AttributeSet(self, node: ast.AttributeSet) -> None:
-        obj  = self._fmt_expr(node.obj)
+        obj  = self._postfix_obj(node.obj)
         val  = self._fmt_expr(node.value)
         self._emit(f"{obj}.{node.attr} = {val};")
 
@@ -395,31 +451,40 @@ class Formatter:
     def _expr_SelfExpr(self, node: ast.SelfExpr, _pop=None) -> str:
         return "self"
 
+    def _bin_child(self, child, op: str, side: str) -> str:
+        """Format an operand of binary *op*, parenthesising only where the
+        parser would otherwise regroup it."""
+        text = self._fmt_expr(child)
+        need = False
+        if isinstance(child, ast.BinOp):
+            cp, mp = _binop_prec(child.op), _binop_prec(op)
+            # ** is right-associative; everything else is left-associative
+            if (op == "**") == (side == "left"):
+                need = cp <= mp
+            else:
+                need = cp < mp
+        elif isinstance(child, ast.UnaryOp) and child.op == "not":
+            need = True  # `not` would swallow the rest of the expression
+        return f"({text})" if need else text
+
+    def _postfix_obj(self, node) -> str:
+        """Format the object of an index / attribute / call suffix."""
+        text = self._fmt_expr(node)
+        if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.LambdaExpr)):
+            return f"({text})"
+        return text
+
     def _expr_BinOp(self, node: ast.BinOp, parent_op: str | None = None) -> str:
-        my_prec = _binop_prec(node.op)
-        # Left child: we evaluate without parent_op and add parens here if needed
-        left_str  = self._fmt_expr(node.left)
-        right_str = self._fmt_expr(node.right)
-
-        # Decide if we need parens around left child
-        if isinstance(node.left, ast.BinOp):
-            left_prec = _binop_prec(node.left.op)
-            if left_prec < my_prec:
-                left_str = f"({left_str})"
-
-        # Decide if we need parens around right child
-        if isinstance(node.right, ast.BinOp):
-            right_prec = _binop_prec(node.right.op)
-            # ** is right-associative so same prec on right is OK
-            if right_prec < my_prec or (right_prec == my_prec and node.op != "**"):
-                right_str = f"({right_str})"
-
+        left_str  = self._bin_child(node.left, node.op, "left")
+        right_str = self._bin_child(node.right, node.op, "right")
         return f"{left_str} {node.op} {right_str}"
 
     def _expr_UnaryOp(self, node: ast.UnaryOp, _pop=None) -> str:
         operand = self._fmt_expr(node.operand)
         # Put parens around binary sub-expression to be safe
-        if isinstance(node.operand, ast.BinOp):
+        if isinstance(node.operand, ast.BinOp) or (
+            isinstance(node.operand, ast.UnaryOp) and node.operand.op == "not" and node.op != "not"
+        ):
             operand = f"({operand})"
         if node.op == "not":
             return f"not {operand}"
@@ -431,10 +496,7 @@ class Formatter:
         return f"{node.name}({args})"
 
     def _expr_CallExpr(self, node: ast.CallExpr, _pop=None) -> str:
-        callee = self._fmt_expr(node.callee)
-        # Wrap callee in parens if it's a lambda or complex expression
-        if isinstance(node.callee, ast.LambdaExpr):
-            callee = f"({callee})"
+        callee = self._postfix_obj(node.callee)
         args = ", ".join(self._fmt_expr(a) for a in node.args)
         return f"{callee}({args})"
 
@@ -456,12 +518,14 @@ class Formatter:
         inner_parts = []
         saved_level = self._level
         self._level = 0
-        saved_lines = self._lines
-        self._lines = []
+        saved_lines, saved_src = self._lines, self._src
+        saved_anchored, saved_cur = self._anchored, self._cur
+        self._lines, self._src, self._anchored, self._cur = [], [], set(), None
         for s in stmts:
             self._fmt_stmt(s)
         inner_parts = [line.strip() for line in self._lines]
-        self._lines = saved_lines
+        self._lines, self._src = saved_lines, saved_src
+        self._anchored, self._cur = saved_anchored, saved_cur
         self._level = saved_level
         body = " ".join(inner_parts)
         return f"func({params_str}) {{ {body} }}"
@@ -473,12 +537,12 @@ class Formatter:
         return f"[{elems}]"
 
     def _expr_ArrayIndex(self, node: ast.ArrayIndex, _pop=None) -> str:
-        arr = self._fmt_expr(node.array)
+        arr = self._postfix_obj(node.array)
         idx = self._fmt_expr(node.index)
         return f"{arr}[{idx}]"
 
     def _expr_ArraySlice(self, node: ast.ArraySlice, _pop=None) -> str:
-        arr   = self._fmt_expr(node.array)
+        arr   = self._postfix_obj(node.array)
         start = self._fmt_expr(node.start) if node.start is not None else ""
         stop  = self._fmt_expr(node.stop)  if node.stop  is not None else ""
         return f"{arr}[{start}:{stop}]"
@@ -505,13 +569,13 @@ class Formatter:
         return f"{self._fmt_expr(node.obj)}[{self._fmt_expr(node.key)}] = {self._fmt_expr(node.value)}"
 
     def _expr_AttributeGet(self, node: ast.AttributeGet, _pop=None) -> str:
-        return f"{self._fmt_expr(node.obj)}.{node.attr}"
+        return f"{self._postfix_obj(node.obj)}.{node.attr}"
 
     def _expr_AttributeSet(self, node: ast.AttributeSet, _pop=None) -> str:
         return f"{self._fmt_expr(node.obj)}.{node.attr} = {self._fmt_expr(node.value)}"
 
     def _expr_MethodCall(self, node: ast.MethodCall, _pop=None) -> str:
-        obj  = self._fmt_expr(node.obj)
+        obj  = self._postfix_obj(node.obj)
         args = ", ".join(self._fmt_expr(a) for a in node.args)
         return f"{obj}.{node.method}({args})"
 
@@ -546,9 +610,10 @@ def format_source(source: str, *, indent_width: int = 4) -> str:
     GravLangError
         If the source contains lexer or parse errors.
     """
-    tokens = Lexer(source).tokenize()
+    lexer  = Lexer(source)
+    tokens = lexer.tokenize()
     tree   = Parser(tokens).parse()
-    return Formatter(indent_width=indent_width).format(tree)
+    return Formatter(indent_width=indent_width).format(tree, lexer.comments)
 
 
 def format_file(path: str, *, indent_width: int = 4) -> str:
