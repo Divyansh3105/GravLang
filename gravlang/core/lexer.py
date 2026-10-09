@@ -34,7 +34,7 @@ TOKEN_SPEC: list[tuple[str, str]] = [
     # Literals
     ("FLOAT",        r"\d+\.\d+"),
     ("INT",          r"\d+"),
-    ("FSTRING",       r'f"(?:[^"\\{}]|\\.|\{[^}]*\})*"'),  # f"Hello {name}!"
+    ("FSTRING",       r'f"(?:[^"\\{}]|\\.|\{\{|\}\}|\{[^}]*\})*"'),  # f"Hello {name}!"
     ("STRING",       r'"(?:[^"\\]|\\.)*"'),
 
 
@@ -126,6 +126,8 @@ class Lexer:
     def __init__(self, source: str):
         self.source = source
         self.source_lines = source.splitlines()  # stored for error messages
+        # (line, text, trailing) for every comment; the formatter re-attaches them
+        self.comments: list[tuple[int, str, bool]] = []
 
     def get_line(self, line_no: int) -> str:
         """Return the source text for a given 1-based line number."""
@@ -135,6 +137,7 @@ class Lexer:
 
     def tokenize(self) -> list[Token]:
         tokens: list[Token] = []
+        self.comments = []
         line = 1
         last_end = 0  # FIXED: track last match end for single-pass illegal char detection
 
@@ -161,7 +164,11 @@ class Lexer:
             if kind == "NEWLINE":
                 line += 1
                 continue
-            if kind in ("SKIP", "COMMENT"):
+            if kind == "SKIP":
+                continue
+            if kind == "COMMENT":
+                trailing = bool(tokens) and tokens[-1].line == line
+                self.comments.append((line, value, trailing))
                 continue
 
             # Keyword / boolean promotion
@@ -169,6 +176,8 @@ class Lexer:
                 kind = KEYWORDS[value]
 
             tokens.append(Token(kind, value, line))
+            if kind in ("STRING", "FSTRING"):
+                line += value.count("\n")  # strings may span lines
 
         # FIXED: check trailing characters after last match (single-pass, no O(n²))
         if last_end < len(self.source):

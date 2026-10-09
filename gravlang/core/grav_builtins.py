@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 def _builtin_print(*args):
     """print(value) → outputs to console (or captured output)."""
-    print(*args)
+    print(*[_builtin_toString(a) for a in args])
 
 
 def _builtin_input(prompt=""):
@@ -86,37 +86,24 @@ def _builtin_toFloat(value):
 
 
 def _builtin_toString(value):
-    """toString(value) → convert to string."""
+    """toString(value) → convert to string (strings are returned as-is)."""
+    if isinstance(value, str):
+        return value
+    return _fmt_value(value)
+
+
+def _fmt_value(value):
+    """GravLang spelling of any value; strings are quoted (used inside containers)."""
     if value is None:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, str):
+        return f'"{value}"'
     if isinstance(value, list):
-        parts = []
-        for v in value:
-            if isinstance(v, str):
-                parts.append(f'"{v}"')
-            elif isinstance(v, bool):
-                parts.append("true" if v else "false")
-            elif v is None:
-                parts.append("null")
-            else:
-                parts.append(str(v))
-        return "[" + ", ".join(parts) + "]"
+        return "[" + ", ".join(_fmt_value(v) for v in value) + "]"
     if isinstance(value, dict):
-        parts = []
-        for k, v in value.items():
-            k_str = f'"{k}"' if isinstance(k, str) else str(k)
-            if isinstance(v, str):
-                v_str = f'"{v}"'
-            elif isinstance(v, bool):
-                v_str = "true" if v else "false"
-            elif v is None:
-                v_str = "null"
-            else:
-                v_str = str(v)
-            parts.append(f"{k_str}: {v_str}")
-        return "{" + ", ".join(parts) + "}"
+        return "{" + ", ".join(f"{_fmt_value(k)}: {_fmt_value(v)}" for k, v in value.items()) + "}"
     return str(value)
 
 
@@ -207,6 +194,7 @@ def _builtin_sort(arr):
         arr.sort()
     except TypeError:
         raise TypeError("sort() cannot compare mixed types")
+    return arr  # like push/reverse: return the mutated array
 
 
 # ── registry ────────────────────────────────────────────────────────

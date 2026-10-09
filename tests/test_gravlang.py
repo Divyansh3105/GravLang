@@ -43,7 +43,7 @@ class TestHelloWorld:
 # 02 Variables
 class TestVariables:
     def test_file(self):
-        assert run_grav_file(_grav("02_variables.grav")) == ["42", "3.14", "GravLang", "True", "None"]
+        assert run_grav_file(_grav("02_variables.grav")) == ["42", "3.14", "GravLang", "true", "null"]
     def test_int(self):
         assert run_grav("let x = 10; print(x);") == ["10"]
     def test_float(self):
@@ -51,11 +51,11 @@ class TestVariables:
     def test_string(self):
         assert run_grav('let x = "hi"; print(x);') == ["hi"]
     def test_bool_true(self):
-        assert run_grav("let x = true; print(x);") == ["True"]
+        assert run_grav("let x = true; print(x);") == ["true"]
     def test_bool_false(self):
-        assert run_grav("let x = false; print(x);") == ["False"]
+        assert run_grav("let x = false; print(x);") == ["false"]
     def test_null(self):
-        assert run_grav("let x = null; print(x);") == ["None"]
+        assert run_grav("let x = null; print(x);") == ["null"]
     def test_reassignment(self):
         assert run_grav("let x = 1; x = 2; print(x);") == ["2"]
     def test_undefined_variable_raises(self):
@@ -171,7 +171,7 @@ class TestFunctions:
     def test_file(self):
         assert run_grav_file(_grav("08_functions.grav")) == ["7", "Hello, World!"]
     def test_no_return_is_none(self):
-        assert run_grav("func f() {} print(f());") == ["None"]
+        assert run_grav("func f() {} print(f());") == ["null"]
     def test_return_value(self):
         assert run_grav("func sq(x) { return x * x; } print(sq(7));") == ["49"]
     def test_multiple_params(self):
@@ -225,7 +225,7 @@ class TestArrays:
 # 11 Dictionaries
 class TestDicts:
     def test_file(self):
-        assert run_grav_file(_grav("11_dicts.grav")) == ["Alice", "30", "NY", "True", "False"]
+        assert run_grav_file(_grav("11_dicts.grav")) == ["Alice", "30", "NY", "true", "false"]
     def test_literal_and_read(self):
         assert run_grav('let d = {"x": 1}; print(d["x"]);') == ["1"]
     def test_write_new_key(self):
@@ -235,7 +235,7 @@ class TestDicts:
             run_grav('let d = {}; print(d["missing"]);')
     def test_has(self):
         src = 'let d = {"a": 1}; print(has(d, "a")); print(has(d, "b"));'
-        assert run_grav(src) == ["True", "False"]
+        assert run_grav(src) == ["true", "false"]
 
 
 # 12 Classes
@@ -348,7 +348,7 @@ class TestBuiltins:
         assert run_grav("print(type(null));") == ["null"]
     def test_hasattr(self):
         src = 'class Pt { func init(x) { self.x = x; } } let p = Pt(1); print(hasAttr(p, "x")); print(hasAttr(p, "y"));'
-        assert run_grav(src) == ["True", "False"]
+        assert run_grav(src) == ["true", "false"]
 
 
 # 17 Augmented assignment
@@ -410,16 +410,16 @@ class TestVariadic:
 class TestArrayUtils:
     def test_file(self):
         assert run_grav_file(_grav("20_array_utils.grav")) == [
-            "[10, 20, 30, 40, 50]", "[5, 4, 3, 2, 1]", "True", "False", "[2, 3, 4]",
+            "[10, 20, 30, 40, 50]", "[5, 4, 3, 2, 1]", "true", "false", "[2, 3, 4]",
         ]
     def test_sort(self):
         assert run_grav("let a = [3,1,2]; sort(a); print(toString(a));") == ["[1, 2, 3]"]
     def test_reverse(self):
         assert run_grav("let a = [1,2,3]; reverse(a); print(toString(a));") == ["[3, 2, 1]"]
     def test_contains_true(self):
-        assert run_grav("print(contains([1,2,3], 2));") == ["True"]
+        assert run_grav("print(contains([1,2,3], 2));") == ["true"]
     def test_contains_false(self):
-        assert run_grav("print(contains([1,2,3], 9));") == ["False"]
+        assert run_grav("print(contains([1,2,3], 9));") == ["false"]
     def test_slice(self):
         assert run_grav("let a = [0,1,2,3,4]; print(toString(a[1:4]));") == ["[1, 2, 3]"]
     def test_slice_from_start(self):
@@ -449,20 +449,20 @@ class TestStrings:
 class TestLogicalOps:
     def test_file(self):
         assert run_grav_file(_grav("22_logical_ops.grav")) == [
-            "True", "False", "True", "False",
-            "False", "True",
+            "true", "false", "true", "false",
+            "false", "true",
             "0", "hi", "hi", "1",
         ]
     def test_and_true(self):
-        assert run_grav("print(true and true);") == ["True"]
+        assert run_grav("print(true and true);") == ["true"]
     def test_and_short_circuit(self):
         assert run_grav('print(0 and "hi");') == ["0"]
     def test_or_short_circuit(self):
         assert run_grav('print(1 or "hi");') == ["1"]
     def test_not_true(self):
-        assert run_grav("print(not true);") == ["False"]
+        assert run_grav("print(not true);") == ["false"]
     def test_not_zero(self):
-        assert run_grav("print(not 0);") == ["True"]
+        assert run_grav("print(not 0);") == ["true"]
     def test_truthy_empty_string(self):
         assert run_grav('if ("") { print("yes"); } else { print("no"); }') == ["no"]
     def test_truthy_nonempty_string(self):
@@ -509,7 +509,7 @@ class TestFStrings:
 class TestDictOps:
     def test_file(self):
         assert run_grav_file(_grav("25_dict_ops.grav")) == [
-            '["a", "b", "c"]', "[1, 2, 3]", "False", "True",
+            '["a", "b", "c"]', "[1, 2, 3]", "false", "true",
         ]
     def test_keys(self):
         src = 'let d = {"z":1,"a":2}; let k = keys(d); sort(k); print(toString(k));'
@@ -519,7 +519,7 @@ class TestDictOps:
         assert run_grav(src) == ["[10, 20]"]
     def test_del_removes_key(self):
         src = 'let d = {"a":1,"b":2}; del(d,"a"); print(has(d,"a")); print(has(d,"b"));'
-        assert run_grav(src) == ["False", "True"]
+        assert run_grav(src) == ["false", "true"]
     def test_del_missing_key_raises(self):
         with pytest.raises((GravLangError, Exception)):
             run_grav('let d = {}; del(d, "x");')

@@ -10,9 +10,19 @@ Operator precedence (low → high):
 
 from __future__ import annotations
 import re as _re
-from .lexer import Token, Lexer
+from .lexer import Token, Lexer, KEYWORDS
 from .errors import ParseError
 from . import ast_nodes as ast
+
+_ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
+
+
+def _unescape(raw: str, extra: dict | None = None) -> str:
+    """Decode escape sequences in one pass (sequential .replace calls would
+    turn an escaped backslash followed by 'n' into a newline)."""
+    table = {**_ESCAPES, **(extra or {})}
+    return _re.sub(r"\\(.)", lambda m: table.get(m.group(1), m.group(0)), raw, flags=_re.DOTALL)
+
 
 # Augmented-assignment token map
 _AUG_OPS = {
@@ -59,14 +69,26 @@ class Parser:
             msg = msg or f"Expected {ttype}, got {tok.type} ({tok.value!r})"
             # A missing token belongs after the previous one, not on the next line/EOF.
             line = self.tokens[self.pos - 1].line if self.pos > 0 else tok.line
-            raise ParseError(msg, line)
+            err = ParseError(msg, line)
+            err.at_eof = tok.type == "EOF"   # lets the REPL ask for more input
+            raise err
         return self._advance()
+
+    def _member_name(self, msg: str) -> Token:
+        """An attribute / method name: an identifier, or a keyword used as one
+        (``obj.print()``, ``self.in``)."""
+        tok = self._current()
+        if tok.type == "ID" or tok.value in KEYWORDS:
+            return self._advance()
+        return self._expect("ID", msg)
 
     # ── entry point ──────────────────────────────────────────────────
 
     def parse(self) -> ast.Program:
         stmts: list = []
         while self._current().type != "EOF":
+            if self._match("SEMI"):   # empty statement (e.g. `};`)
+                continue
             stmts.append(self._statement())
         return ast.Program(body=stmts)
 
@@ -255,11 +277,7 @@ class Parser:
         path_tok = self._expect("STRING", "Expected a string path after 'import'")
         # Strip surrounding quotes and unescape, same as _atom STRING handling
         raw = path_tok.value[1:-1]
-        raw = (raw
-               .replace("\\n", "\n")
-               .replace("\\t", "\t")
-               .replace('\\"', '"')
-               .replace("\\\\", "\\"))
+        raw = _unescape(raw)
         self._expect("SEMI", "Expected ';' after import path")
         return ast.ImportStmt(path=raw, line=line)
 
@@ -335,10 +353,11 @@ class Parser:
         return self._expression()
 
     # func name(params) { body }
-    def _func_decl(self) -> ast.FuncDecl:
+    def _func_decl(self, method: bool = False) -> ast.FuncDecl:
         line = self._current().line
         self._expect("FUNC")
-        name_tok = self._expect("ID", "Expected function name after 'func'")
+        msg = "Expected function name after 'func'"
+        name_tok = self._member_name(msg) if method else self._expect("ID", msg)
         self._expect("LPAREN", "Expected '(' after function name")
 
         params: list[str] = []
@@ -360,8 +379,8 @@ class Parser:
                     )
                 break
             params.append(self._expect("ID", "Expected parameter name").value)
-            if self._current().type == "COMMA":
-                self._advance()
+            if not self._match("COMMA") and self._current().type != "RPAREN":
+                raise ParseError("Expected ',' or ')' after parameter", self._current().line)
 
         self._expect("RPAREN", "Expected ')' after parameters")
         body = self._block()
@@ -402,7 +421,7 @@ class Parser:
                     "Only function (method) declarations allowed inside class body",
                     self._current().line,
                 )
-            methods.append(self._func_decl())
+            methods.append(self._func_decl(method=True))
 
         self._expect("RBRACE", "Expected '}' after class body")
         return ast.ClassDecl(name=name_tok.value, parent=parent, methods=methods, line=line)
@@ -475,6 +494,8 @@ class Parser:
         self._expect("LBRACE", "Expected '{'")
         stmts: list = []
         while self._current().type != "RBRACE" and self._current().type != "EOF":
+            if self._match("SEMI"):
+                continue
             stmts.append(self._statement())
         self._expect("RBRACE", "Expected '}'")
         return ast.Block(statements=stmts)
@@ -571,7 +592,7 @@ class Parser:
                 continue
             if self._current().type == "DOT":
                 self._advance()
-                attr_tok = self._expect("ID", "Expected attribute name after '.'")
+                attr_tok = self._member_name("Expected attribute name after '.'")
                 if self._current().type == "LPAREN":
                     self._advance()
                     args: list = []
@@ -644,7 +665,7 @@ class Parser:
         if tok.type == "STRING":
             self._advance()
             raw = tok.value[1:-1]
-            raw = raw.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"').replace("\\\\", "\\")
+            raw = _unescape(raw)
             return ast.Literal(value=raw, line=tok.line)
         if tok.type == "TRUE":
             self._advance()
@@ -679,7 +700,9 @@ class Parser:
         if tok.type == "LBRACKET":
             return self._array_literal()
 
-        raise ParseError(f"Unexpected token: {tok.type} ({tok.value!r})", tok.line)
+        err = ParseError(f"Unexpected token: {tok.type} ({tok.value!r})", tok.line)
+        err.at_eof = tok.type == "EOF"
+        raise err
 
     def _array_literal(self) -> ast.ArrayLiteral:
         line = self._current().line
@@ -687,9 +710,9 @@ class Parser:
         elements = []
         while self._current().type != "RBRACKET":
             elements.append(self._expression())
-            if self._current().type == "COMMA":
-                self._advance()
-        self._expect("RBRACKET", "Expected ']' after array literal")
+            if not self._match("COMMA"):
+                break
+        self._expect("RBRACKET", "Expected ',' or ']' in array literal")
         return ast.ArrayLiteral(elements=elements, line=line)
 
     def _dict_literal(self) -> ast.DictLiteral:
@@ -704,9 +727,9 @@ class Parser:
             val_node = self._expression()
             keys.append(key_node)
             values.append(val_node)
-            if self._current().type == "COMMA":
-                self._advance()
-        self._expect("RBRACE", "Expected '}' after dict literal")
+            if not self._match("COMMA"):
+                break
+        self._expect("RBRACE", "Expected ',' or '}' in dict literal")
         return ast.DictLiteral(keys=keys, values=values, line=line)
 
     def _lambda_expr(self) -> ast.LambdaExpr:
@@ -736,8 +759,8 @@ class Parser:
                     )
                 break
             params.append(self._expect("ID", "Expected parameter name").value)
-            if self._current().type == "COMMA":
-                self._advance()
+            if not self._match("COMMA") and self._current().type != "RPAREN":
+                raise ParseError("Expected ',' or ')' after parameter", self._current().line)
 
         self._expect("RPAREN", "Expected ')' after lambda parameters")
         body = self._block()
@@ -763,38 +786,40 @@ class Parser:
         content = raw[2:-1]
 
         # Apply escape sequences (same as plain STRING handling)
-        content = (
-            content
-            .replace('\\n', '\n')
-            .replace('\\t', '\t')
-            .replace('\\\'', "'")
-            .replace('\\"', '"')
-            .replace('\\\\', '\\')
-        )
+        content = _unescape(content, {"'": "'"})
 
-        # Split into alternating [literal, expr, literal, expr, ...]
-        # re.split with a capturing group yields:
-        #   [lit0, expr0, lit1, expr1, ...]
-        parts = _re.split(r'\{([^}]*)\}', content)
-
+        # Walk the text: `{{` / `}}` are literal braces, `{expr}` is interpolation.
         nodes: list = []
-        for i, part in enumerate(parts):
-            if i % 2 == 0:
-                # Literal segment
-                if part:   # skip empty strings to keep the tree clean
-                    nodes.append(ast.Literal(value=part, line=line))
+
+        def add_literal(text: str):
+            if not text:
+                return
+            if nodes and isinstance(nodes[-1], ast.Literal):
+                nodes[-1] = ast.Literal(value=nodes[-1].value + text, line=line)
             else:
-                # Expression segment — re-lex + re-parse
-                expr_src = part.strip()
+                nodes.append(ast.Literal(value=text, line=line))
+
+        pos = 0
+        for m in _re.finditer(r'\{\{|\}\}|\{([^}]*)\}', content):
+            add_literal(content[pos:m.start()])
+            pos = m.end()
+            if m.group(0) == "{{":
+                add_literal("{")
+            elif m.group(0) == "}}":
+                add_literal("}")
+            else:
+                expr_src = m.group(1).strip()
                 if not expr_src:
                     continue
-                sub_tokens = Lexer(expr_src).tokenize()
-                sub_parser = Parser(sub_tokens)
+                sub_parser = Parser(Lexer(expr_src).tokenize())
                 expr_node = sub_parser._expression()
+                if sub_parser._current().type != "EOF":
+                    raise ParseError(
+                        f"Unexpected {sub_parser._current().value!r} in f-string expression "
+                        f"{{{expr_src}}}", line)
                 # Wrap in toString() so GravLang-native types format correctly
-                nodes.append(
-                    ast.FuncCall(name="toString", args=[expr_node], line=line)
-                )
+                nodes.append(ast.FuncCall(name="toString", args=[expr_node], line=line))
+        add_literal(content[pos:])
 
         if not nodes:
             return ast.Literal(value="", line=line)

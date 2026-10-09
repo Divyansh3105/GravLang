@@ -35,6 +35,7 @@ class ParseError(GravLangError):
     """Raised by the parser on a syntax error."""
 
     kind = "Parse Error"
+    at_eof = False  # True when the parser ran out of input (REPL: keep reading)
 
 
 class GravLangRuntimeError(GravLangError):

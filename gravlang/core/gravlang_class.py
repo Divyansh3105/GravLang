@@ -16,10 +16,11 @@ if TYPE_CHECKING:
 class GravLangClass:
     """Runtime representation of a GravLang class declaration."""
 
-    def __init__(self, name: str, parent: "GravLangClass | None", methods: dict):
+    def __init__(self, name: str, parent: "GravLangClass | None", methods: dict, env=None):
         self.name = name
         self.parent = parent
         self.methods = methods  # dict[str, ast.FuncDecl]
+        self.env = env          # scope the class was declared in (methods close over it)
 
     def find_method(self, name: str):
         """Look up a method by name, walking the inheritance chain."""
@@ -28,6 +29,14 @@ class GravLangClass:
         if self.parent is not None:
             return self.parent.find_method(name)
         return None
+
+    def find_method_owner(self, name: str):
+        """Like find_method but returns (decl, defining_class), or (None, None)."""
+        if name in self.methods:
+            return self.methods[name], self
+        if self.parent is not None:
+            return self.parent.find_method_owner(name)
+        return None, None
 
     def __repr__(self) -> str:
         return f"<class {self.name}>"

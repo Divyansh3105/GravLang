@@ -14,7 +14,8 @@ import os
 
 from .core.lexer import Lexer
 from .core.parser import Parser
-from .core.interpreter import Interpreter
+from .core.interpreter import Interpreter, ReturnSignal
+from .core.errors import BreakSignal, ContinueSignal
 from .core.errors import GravLangError, ParseError
 from .core.grav_builtins import _builtin_toString
 
@@ -44,7 +45,8 @@ def run_file(path: str) -> None:
 def repl() -> None:
     """Interactive read-eval-print loop."""
     print("GravLang REPL. Type 'exit' to quit.")
-    interp = Interpreter(source="<stdin>", current_file=os.getcwd())
+    # current_file is a pseudo-file inside cwd so imports resolve against cwd
+    interp = Interpreter(source="<stdin>", current_file=os.path.join(os.getcwd(), "<repl>"))
     
     buffer = ""
     while True:
@@ -70,7 +72,7 @@ def repl() -> None:
         try:
             tree = Parser(tokens).parse()
         except ParseError as e:
-            if "EOF" in str(e):
+            if e.at_eof:
                 continue
             else:
                 print(f"❌ {e}")
@@ -85,6 +87,8 @@ def repl() -> None:
                         print(_builtin_toString(val))
         except GravLangError as e:
             print(f"❌ {e}")
+        except (ReturnSignal, BreakSignal, ContinueSignal):
+            print("❌ Runtime Error: 'return'/'break'/'continue' outside of a function or loop")
         except RecursionError:
             print("❌ Runtime Error: Stack overflow")
             

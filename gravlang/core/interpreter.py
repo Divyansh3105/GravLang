@@ -7,12 +7,13 @@ Uses the visitor pattern: ``visit(node)`` dispatches to
 
 from __future__ import annotations
 import os
+import re
 import sys
 from typing import Callable
 from . import ast_nodes as ast
 from .environment import Environment
 from .grav_builtins import register_builtins, _builtin_toString
-from .errors import GravLangError, GravLangRuntimeError, BreakSignal, ContinueSignal
+from .errors import GravLangError, GravLangRuntimeError, BreakSignal, ContinueSignal, ExecutionStopped
 from .gravlang_class import GravLangClass, GravLangInstance
 
 # Python recursion limit needed so our own call-depth check always fires first
@@ -65,7 +66,7 @@ class Interpreter:
 
     def __init__(self, *, print_fn=None, input_fn=None, source: str = "",
                  current_file: str = "", _imported_paths: set | None = None,
-                 on_step=None):
+                 on_step=None, cancel_check=None, _module_cache: dict | None = None):
         """
         Parameters
         ----------
@@ -99,13 +100,17 @@ class Interpreter:
         # Module system
         self._current_file    = os.path.abspath(current_file) if current_file else ""
         self._imported_paths  = _imported_paths if _imported_paths is not None else set()
+        # path -> exported names, shared with child interpreters so a module
+        # imported twice (diamond import) is still merged into every importer
+        self._module_cache    = _module_cache if _module_cache is not None else {}
 
         # Call-stack depth tracking
         self._call_depth = 0
         self._max_depth = 200
 
         if print_fn is not None:
-            self.global_env.set("print", print_fn)
+            # user code sees GravLang spelling (true/null/[...]) whatever the host prints with
+            self.global_env.set("print", lambda *a: print_fn(*[_builtin_toString(x) for x in a]))
 
         if input_fn is not None:
             self.global_env.set("input", input_fn)
@@ -114,6 +119,8 @@ class Interpreter:
         self._print_fn = print_fn
         self._input_fn = input_fn
         self._on_step = on_step
+        # polled once per loop iteration so Stop works even in step-less loops
+        self._cancel_check = cancel_check
 
     # ── source-line helper ───────────────────────────────────────────
 
@@ -126,8 +133,13 @@ class Interpreter:
     # ── public API ───────────────────────────────────────────────────
 
     def interpret(self, program: ast.Program) -> None:
-        for stmt in program.body:
-            self._exec(stmt, self.global_env)
+        try:
+            for stmt in program.body:
+                self._exec(stmt, self.global_env)
+        except ReturnSignal:
+            raise GravLangRuntimeError("'return' outside of a function")
+        except (BreakSignal, ContinueSignal):
+            raise GravLangRuntimeError("'break'/'continue' outside of a loop")
 
     # ── dispatch ─────────────────────────────────────────────────────
 
@@ -142,7 +154,12 @@ class Interpreter:
             if visitor is None:
                 raise GravLangRuntimeError(f"Unknown AST node: {cls.__name__}")
             self._visitors[cls] = visitor
-        return visitor(node, env)
+        try:
+            return visitor(node, env)
+        except (TypeError, ZeroDivisionError, OverflowError, ValueError) as e:
+            # Python-level failures (e.g. -"a", 0 ** -1) become catchable GravLang errors
+            line = getattr(node, 'line', None)
+            raise GravLangRuntimeError(str(e), line, self._get_source_line(line)) from None
 
     # ── statements ───────────────────────────────────────────────────
 
@@ -211,42 +228,42 @@ class Interpreter:
         if node.else_body is not None:
             return self._exec(node.else_body, env)
 
+    # Loop `else` uses Python's while/for-else: it runs only when the loop ends
+    # without `break`, never while a return/exception is unwinding.
     def _visit_WhileStmt(self, node: ast.WhileStmt, env: Environment):
-        broke = False
         try:
             while self._truthy(self._exec(node.condition, env)):
+                self._tick()
                 try:
                     self._exec(node.body, env)
                 except BreakSignal:
-                    broke = True
                     break
                 except ContinueSignal:
                     continue
+            else:
+                if node.else_body is not None:
+                    self._exec(node.else_body, env)
         finally:
-            # else runs only if loop completed normally (no break)
-            if not broke and node.else_body is not None:
-                self._exec(node.else_body, env)
-            # finally always runs
             if node.finally_body is not None:
                 self._exec(node.finally_body, env)
 
     def _visit_ForStmt(self, node: ast.ForStmt, env: Environment):
         loop_env = Environment(parent=env)
         self._exec(node.init, loop_env)
-        broke = False
         try:
             while self._truthy(self._exec(node.condition, loop_env)):
+                self._tick()
                 try:
                     self._exec(node.body, loop_env)
                 except BreakSignal:
-                    broke = True
                     break
                 except ContinueSignal:
                     pass  # fall through to update (correct for-loop continue)
                 self._exec(node.update, loop_env)
+            else:
+                if node.else_body is not None:
+                    self._exec(node.else_body, loop_env)
         finally:
-            if not broke and node.else_body is not None:
-                self._exec(node.else_body, loop_env)
             if node.finally_body is not None:
                 self._exec(node.finally_body, loop_env)
 
@@ -259,21 +276,21 @@ class Interpreter:
                 "for...in loop requires an array, string, or dict", node.line,
                 self._get_source_line(node.line),
             )
-        broke = False
         try:
             for item in iterable:
+                self._tick()
                 loop_env = Environment(parent=env)
                 loop_env.set(node.var, item)
                 try:
                     self._exec(node.body, loop_env)
                 except BreakSignal:
-                    broke = True
                     break
                 except ContinueSignal:
                     continue
+            else:
+                if node.else_body is not None:
+                    self._exec(node.else_body, env)
         finally:
-            if not broke and node.else_body is not None:
-                self._exec(node.else_body, env)
             if node.finally_body is not None:
                 self._exec(node.finally_body, env)
 
@@ -384,7 +401,10 @@ class Interpreter:
         # ── 2. Circular / duplicate import guard ────────────────────────
         norm_path = os.path.normcase(abs_path)
         if norm_path in self._imported_paths:
-            return  # already loaded — skip silently
+            # already loaded: re-export its names; if still loading (circular), skip
+            for name, value in self._module_cache.get(norm_path, {}).items():
+                env.set(name, value)
+            return
         self._imported_paths.add(norm_path)
 
         # ── 3. Read the module source ───────────────────────────────────
@@ -406,6 +426,7 @@ class Interpreter:
             source=source,
             current_file=abs_path,
             _imported_paths=self._imported_paths,   # shared — prevents re-import
+            _module_cache=self._module_cache,
             print_fn=self._print_fn,
             input_fn=self._input_fn,
         )
@@ -413,9 +434,11 @@ class Interpreter:
 
         # ── 6. Merge exports into caller's env ──────────────────────────
         builtin_names = set(BUILTINS.keys())
-        for name, value in child.global_env._store.items():
-            if name not in builtin_names:   # don't clobber built-ins
-                env.set(name, value)
+        exports = {n: v for n, v in child.global_env._store.items()
+                   if n not in builtin_names}   # don't clobber built-ins
+        self._module_cache[norm_path] = exports
+        for name, value in exports.items():
+            env.set(name, value)
 
     def _visit_Block(self, node: ast.Block, env: Environment):
         block_env = Environment(parent=env)
@@ -465,7 +488,7 @@ class Interpreter:
                     f"'{node.parent}' is not a class", node.line,
                 )
         methods = {m.name: m for m in node.methods}
-        klass = GravLangClass(name=node.name, parent=parent, methods=methods)
+        klass = GravLangClass(name=node.name, parent=parent, methods=methods, env=env)
         env.set(node.name, klass)
 
     # ── expressions ──────────────────────────────────────────────────
@@ -539,7 +562,13 @@ class Interpreter:
                         raise GravLangRuntimeError("Modulo by zero", node.line,
                                                    self._get_source_line(node.line))
                     return left % right
-                case "**": return left ** right
+                case "**":
+                    result = left ** right
+                    if isinstance(result, complex):
+                        raise GravLangRuntimeError(
+                            "Math error: result of '**' is not a real number", node.line,
+                            self._get_source_line(node.line))
+                    return result
                 case "==": return left == right
                 case "!=": return left != right
                 case "<":  return left < right
@@ -573,7 +602,9 @@ class Interpreter:
             try:
                 return callee(*args)
             except (TypeError, ValueError, KeyError, IndexError) as e:
-                raise GravLangRuntimeError(str(e), node.line, self._get_source_line(node.line))
+                # hide Python internals: "_builtin_len() takes 1 ..." -> "len() takes 1 ..."
+                msg = re.sub(r"\b_builtin_(\w+)\(\)", r"\1()", str(e))
+                raise GravLangRuntimeError(msg, node.line, self._get_source_line(node.line))
 
         # User-defined function
         if isinstance(callee, GravFunction):
@@ -621,7 +652,9 @@ class Interpreter:
             try:
                 return callee(*args)
             except (TypeError, ValueError, KeyError, IndexError) as e:
-                raise GravLangRuntimeError(str(e), node.line, self._get_source_line(node.line))
+                # hide Python internals: "_builtin_len() takes 1 ..." -> "len() takes 1 ..."
+                msg = re.sub(r"\b_builtin_(\w+)\(\)", r"\1()", str(e))
+                raise GravLangRuntimeError(msg, node.line, self._get_source_line(node.line))
         raise GravLangRuntimeError(
             f"Expression is not callable (got {type(callee).__name__})", node.line,
         )
@@ -753,49 +786,71 @@ class Interpreter:
             raise GravLangRuntimeError(
                 f"Cannot call method '{node.method}' on non-object", node.line,
             )
-        method_decl = obj.klass.find_method(node.method)
+        method_decl, owner = obj.klass.find_method_owner(node.method)
         if method_decl is None:
+            # a field holding a function / lambda: obj.callback(x)
+            field = obj.fields.get(node.method)
+            if isinstance(field, GravFunction):
+                args = [self._exec(arg, env) for arg in node.args]
+                return self._call_function(field, args, node.line)
+            if callable(field):
+                args = [self._exec(arg, env) for arg in node.args]
+                try:
+                    return field(*args)
+                except (TypeError, ValueError, KeyError, IndexError) as e:
+                    raise GravLangRuntimeError(str(e), node.line, self._get_source_line(node.line))
             raise GravLangRuntimeError(
                 f"'{obj.klass.name}' object has no method '{node.method}'",
                 node.line, self._get_source_line(node.line),
             )
         args = [self._exec(arg, env) for arg in node.args]
-        n_fixed = len(method_decl.params)
-        has_variadic = method_decl.variadic is not None
-        if has_variadic:
+        return self._invoke_method(method_decl, owner, obj, args, node.method, node.line)
+
+    def _invoke_method(self, decl, owner, instance, args: list, name: str, line: int):
+        """Run a method with arity check, depth tracking and the defining class's scope."""
+        n_fixed = len(decl.params)
+        if decl.variadic is not None:
             if len(args) < n_fixed:
                 raise GravLangRuntimeError(
-                    f"Method '{node.method}' expects at least {n_fixed} "
-                    f"argument(s), got {len(args)}", node.line,
+                    f"Method '{name}' expects at least {n_fixed} "
+                    f"argument(s), got {len(args)}", line,
                 )
-        else:
-            if len(args) != n_fixed:
-                raise GravLangRuntimeError(
-                    f"Method '{node.method}' expects {n_fixed} "
-                    f"argument(s), got {len(args)}", node.line,
-                )
-        # Call with depth tracking
-        self._call_depth += 1
-        if self._call_depth > self._max_depth:
-            self._call_depth = 0
+        elif len(args) != n_fixed:
             raise GravLangRuntimeError(
-                f"Stack overflow: maximum call depth ({self._max_depth}) exceeded",
-                node.line, self._get_source_line(node.line),
+                f"Method '{name}' expects {n_fixed} "
+                f"argument(s), got {len(args)}", line,
             )
+        self._enter_call(line)
         try:
-            method_env = Environment(parent=self.global_env)
-            method_env.set("self", obj)
-            for param, arg in zip(method_decl.params, args):
+            method_env = Environment(parent=owner.env or self.global_env)
+            method_env.set("self", instance)
+            for param, arg in zip(decl.params, args):
                 method_env.set(param, arg)
-            if has_variadic:
-                method_env.set(method_decl.variadic, list(args[n_fixed:]))
+            if decl.variadic is not None:
+                method_env.set(decl.variadic, list(args[n_fixed:]))
             try:
-                self._exec(method_decl.body, method_env)
+                self._exec(decl.body, method_env)
             except ReturnSignal as ret:
                 return ret.value
+            except (BreakSignal, ContinueSignal):
+                raise GravLangRuntimeError("'break'/'continue' outside of a loop", line)
             return None
         finally:
             self._call_depth -= 1
+
+    def _tick(self):
+        if self._cancel_check is not None and self._cancel_check():
+            raise ExecutionStopped()
+
+    def _enter_call(self, line: int):
+        """Bump the call depth; on overflow undo the bump so the counter stays balanced."""
+        self._call_depth += 1
+        if self._call_depth > self._max_depth:
+            self._call_depth -= 1
+            raise GravLangRuntimeError(
+                f"Stack overflow: maximum call depth ({self._max_depth}) exceeded",
+                line, self._get_source_line(line),
+            )
 
     # ── helper: call a GravFunction (with depth tracking) ────────────
 
@@ -817,13 +872,7 @@ class Interpreter:
                     f"argument(s), got {len(args)}", line,
                 )
 
-        self._call_depth += 1
-        if self._call_depth > self._max_depth:
-            self._call_depth = 0
-            raise GravLangRuntimeError(
-                f"Stack overflow: maximum call depth ({self._max_depth}) exceeded",
-                line, self._get_source_line(line),
-            )
+        self._enter_call(line)
         try:
             call_env = Environment(parent=fn.closure)
             # bind fixed params
@@ -836,6 +885,8 @@ class Interpreter:
                 self._exec(decl.body, call_env)
             except ReturnSignal as ret:
                 return ret.value
+            except (BreakSignal, ContinueSignal):
+                raise GravLangRuntimeError("'break'/'continue' outside of a loop", line)
             return None
         finally:
             self._call_depth -= 1
@@ -844,31 +895,9 @@ class Interpreter:
 
     def _instantiate(self, klass: GravLangClass, args: list, line: int):
         instance = GravLangInstance(klass)
-        init_method = klass.find_method("init")
+        init_method, owner = klass.find_method_owner("init")
         if init_method is not None:
-            if len(args) != len(init_method.params):
-                raise GravLangRuntimeError(
-                    f"Class '{klass.name}' init() expects {len(init_method.params)} "
-                    f"argument(s), got {len(args)}", line,
-                )
-            self._call_depth += 1
-            if self._call_depth > self._max_depth:
-                self._call_depth = 0
-                raise GravLangRuntimeError(
-                    f"Stack overflow: maximum call depth ({self._max_depth}) exceeded",
-                    line, self._get_source_line(line),
-                )
-            try:
-                init_env = Environment(parent=self.global_env)
-                init_env.set("self", instance)
-                for param, arg in zip(init_method.params, args):
-                    init_env.set(param, arg)
-                try:
-                    self._exec(init_method.body, init_env)
-                except ReturnSignal:
-                    pass
-            finally:
-                self._call_depth -= 1
+            self._invoke_method(init_method, owner, instance, args, "init", line)
         else:
             if args:
                 raise GravLangRuntimeError(
