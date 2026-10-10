@@ -7,7 +7,7 @@ from .constants import *
 from .constants import _AC_KEYWORDS, _AC_BUILTINS
 from .themes import THEMES
 from .components import LintTooltip, AutoCompletePopup, FindReplaceBar
-from .compiler_view import _offset_to_pos
+from bisect import bisect_right
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -55,6 +55,7 @@ class EditorTab:
         self.theme = theme
         self.filepath: str  = ""
         self.modified: bool = False
+        self._last_text: str = ""   # text at last key release; only real edits set `modified`
         self._on_change = on_change_cb
         self._on_cursor = on_cursor_cb
         self.breakpoints: set[int] = set()
@@ -159,6 +160,8 @@ class EditorTab:
         ed.bind("[", lambda e: self._auto_close("[", "]"))
         ed.bind("{", lambda e: self._auto_close("{", "}"))
         ed.bind('"', lambda e: self._auto_close('"', '"'))
+        for closer in (")", "]", "}"):
+            ed.bind(closer, lambda e, c=closer: self._overtype(c))
         ed.bind("<Control-slash>",  self._toggle_comment)
         ed.bind("<Control-d>",      self._duplicate_line)
         ed.bind("<Up>",    self._ac_up)
@@ -174,13 +177,20 @@ class EditorTab:
             return
         if event.keysym not in ("Return","Tab","space","BackSpace"):
             self._maybe_autocomplete()
+        self.notify_edited()
+        self._on_cursor_move(event)
+
+    def notify_edited(self):
+        """Refresh state after the text may have changed (typing, find/replace)."""
+        text = self.get_content()
+        if text != self._last_text:
+            self._last_text = text
+            self.modified = True
         self._on_change()
-        self.modified = True
         self._highlight()
         self._update_line_numbers()
-        self._on_cursor_move(event)
         # Take a source snapshot on the main thread so the worker is safe
-        self._lint_source_snap = self.editor.get("1.0", "end-1c")
+        self._lint_source_snap = text
         self._start_lint_timer()
 
     def _on_cursor_move(self, event=None):
@@ -275,23 +285,56 @@ class EditorTab:
         self.editor.focus_set()  # ensure editor regains focus after popup closes
         self._highlight()
 
+    def _overtype(self, ch):
+        """Typing a closer right before the same auto-inserted closer steps over it."""
+        if self.editor.get("insert", "insert+1c") == ch:
+            self.editor.mark_set("insert", "insert+1c")
+            return "break"
+
     def _auto_close(self, open_ch, close_ch):
-        self.editor.insert("insert", open_ch + close_ch)
-        pos = self.editor.index("insert")
-        row, col = pos.split(".")
-        self.editor.mark_set("insert", f"{row}.{int(col)-1}")
+        ed = self.editor
+        if open_ch == close_ch and ed.get("insert", "insert+1c") == close_ch:
+            ed.mark_set("insert", "insert+1c")          # closing quote: step over
+            return "break"
+        if ed.tag_ranges("sel"):                        # wrap the selection
+            first, last = ed.index("sel.first"), ed.index("sel.last")
+            inner = ed.get(first, last)
+            ed.delete(first, last)
+            ed.insert(first, open_ch + inner + close_ch)
+            ed.mark_set("insert", f"{first}+{len(inner) + 2}c")
+            return "break"
+        if open_ch == close_ch:
+            prev = ed.get("insert-1c", "insert")
+            if prev.isalnum() or prev == "\\":          # apostrophe-like / escaped: plain char
+                ed.insert("insert", open_ch)
+                return "break"
+        ed.insert("insert", open_ch + close_ch)
+        ed.mark_set("insert", "insert-1c")
         return "break"
 
     def _toggle_comment(self, event=None):
-        idx  = self.editor.index("insert")
-        row  = idx.split(".")[0]
-        line = self.editor.get(f"{row}.0", f"{row}.end")
-        if line.lstrip().startswith("#"):
-            new = line.replace("# ", "", 1).replace("#", "", 1)
+        ed = self.editor
+        if ed.tag_ranges("sel"):
+            first = int(ed.index("sel.first").split(".")[0])
+            last = int(ed.index("sel.last").split(".")[0])
+            if ed.index("sel.last").endswith(".0") and last > first:
+                last -= 1                                 # selection ended at a line start
         else:
-            new = "# " + line
-        self.editor.delete(f"{row}.0", f"{row}.end")
-        self.editor.insert(f"{row}.0", new)
+            first = last = int(ed.index("insert").split(".")[0])
+        rows = range(first, last + 1)
+        lines = {r: ed.get(f"{r}.0", f"{r}.end") for r in rows}
+        body = [l for l in lines.values() if l.strip()]
+        uncomment = bool(body) and all(l.lstrip().startswith("#") for l in body)
+        for r, line in lines.items():
+            if not line.strip():
+                continue
+            if uncomment:   # remove only the leading marker (and one space)
+                new = re.sub(r"^(\s*)# ?", r"\1", line, count=1)
+            else:
+                new = re.sub(r"^(\s*)", r"\1# ", line, count=1)
+            ed.delete(f"{r}.0", f"{r}.end")
+            ed.insert(f"{r}.0", new)
+        self.notify_edited()
         return "break"
 
     def _duplicate_line(self, event=None):
@@ -398,23 +441,38 @@ class EditorTab:
                     "boolean","self_kw","class_nm","augop"):
             ed.tag_remove(tag, "1.0", "end")
         content = ed.get("1.0", "end-1c")
-        patterns = [
-            ("comment",  COMMENTS),
-            ("string",   STRINGS),
-            ("boolean",  BOOLEANS),
-            ("self_kw",  SELF_KW),
-            ("keyword",  KEYWORDS),
-            ("builtin",  BUILTINS),
-            ("number",   NUMBERS),
-            ("augop",    AUG_OPS),
-            ("class_nm", CLASS_NAME),
-        ]
-        for tag, pat in patterns:
-            for m in re.finditer(pat, content):
-                s = m.start(); e = m.end()
-                l1, c1 = _offset_to_pos(content, s)
-                l2, c2 = _offset_to_pos(content, e)
-                ed.tag_add(tag, f"{l1}.{c1}", f"{l2}.{c2}")
+
+        # offset -> "line.col" without rescanning the text for every match
+        starts = [0]
+        for m in re.finditer("\n", content):
+            starts.append(m.end())
+
+        def pos(off: int) -> str:
+            ln = bisect_right(starts, off) - 1
+            return f"{ln + 1}.{off - starts[ln]}"
+
+        after_class = False   # previous word was `class` / `extends`
+        for m in TOKEN_RE.finditer(content):
+            kind = m.lastgroup
+            if kind == "word":
+                w = m.group()
+                if after_class:
+                    tag = "class_nm"
+                elif w in BOOLEAN_SET:
+                    tag = "boolean"
+                elif w == "self":
+                    tag = "self_kw"
+                elif w in KEYWORD_SET:
+                    tag = "keyword"
+                elif w in BUILTIN_SET or w == "print":
+                    tag = "builtin"
+                else:
+                    tag = None
+                after_class = w in ("class", "extends")
+                if tag:
+                    ed.tag_add(tag, pos(m.start()), pos(m.end()))
+            else:
+                ed.tag_add(kind, pos(m.start()), pos(m.end()))
         # active line
         ed.tag_remove("active_ln", "1.0", "end")
         cur_row = ed.index("insert").split(".")[0]
@@ -623,6 +681,7 @@ class EditorTab:
         self._highlight()
         self._update_line_numbers()
         self.modified = False
+        self._last_text = self.get_content()
 
     def name(self):
         return os.path.basename(self.filepath) if self.filepath else "untitled.grav"

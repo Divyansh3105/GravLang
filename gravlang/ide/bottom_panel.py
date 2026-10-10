@@ -240,14 +240,9 @@ class BottomPanel(tk.Frame):
             txt.insert("end", text, tag)
         else:
             # Auto-colorize typed literals if plain text
-            lines = text.splitlines(keepends=True)
-            for line in lines:
-                if line.startswith("❌") or "Error" in line:
-                    txt.insert("end", line, "error")
-                elif line.startswith("✓") or line.startswith("──"):
-                    txt.insert("end", line, "timing" if line.startswith("✓") else "sep")
-                else:
-                    self._insert_typed_line(txt, line)
+            # (IDE messages pass an explicit tag; user output is never treated as an error)
+            for line in text.splitlines(keepends=True):
+                self._insert_typed_line(txt, line)
         txt.configure(state="disabled")
         txt.see("end")
 
@@ -288,7 +283,7 @@ class BottomPanel(tk.Frame):
         self.hdr.configure(bg=t["BG_MANTLE"])
         self.tab_bar.configure(bg=t["BG_MANTLE"])
         self.out_frame.configure(bg=t["BG_CRUST"])
-        self.output_txt.configure(bg=t["BG_CRUST"], fg=t["TEXT_MAIN"])
+        self.output_txt.configure(bg=t["BG_CRUST"], fg=t["GREEN"])
 
         self._setup_output_tags()
         self.problems_view.apply_theme(theme)

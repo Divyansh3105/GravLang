@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import os, json, time, threading, re
+import os, sys, json, time, threading, re
 from datetime import datetime
 from .themes import THEMES, CONFIG_FILE
 from .constants import *
@@ -84,6 +84,7 @@ class GravLangIDE:
         self._active_input_event: threading.Event | None = None
 
         self.root.configure(bg=self.theme["BG_BASE"])
+        self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
         self._build_ui()
         self._bind_global()
 
@@ -154,7 +155,7 @@ class GravLangIDE:
         controls = [
             ("─",  t["BG_SURFACE0"], self._minimize_window),
             ("□",  t["BG_SURFACE0"], self._toggle_fullscreen),
-            ("✕",  "#c42b1c",        self.root.destroy),
+            ("✕",  "#c42b1c",        self._on_quit),
         ]
         self._win_btns = []
         for symbol, hover_bg, cmd in controls:
@@ -268,13 +269,19 @@ class GravLangIDE:
         # We defer actual packing until _build_body has run (called after it).
         pass
 
+    def _after_find_edit(self):
+        tab = self._active_tab()
+        if tab:
+            tab.notify_edited()
+
     def _attach_findbar(self):
         """Called after _editor_pane exists.  Creates the bar inside the pane."""
         t = self.theme
         self._findbar = FindReplaceBar(
             self._editor_pane,
             editor_getter=self._active_editor,
-            theme=t, bg=t["BG_MANTLE"])
+            theme=t, bg=t["BG_MANTLE"],
+            on_edit=self._after_find_edit)
         # not packed yet — shown on demand via _toggle_find()
 
     def _build_body(self):
@@ -514,7 +521,7 @@ class GravLangIDE:
         tab = EditorTab(self._editor_stack, t,
                         on_change_cb=self._on_editor_change,
                         on_cursor_cb=self._on_cursor_move)
-        if filepath:
+        if filepath or content:
             tab.filepath = filepath
             tab.set_content(content)
         else:
@@ -629,10 +636,8 @@ class GravLangIDE:
             return
 
         tab = self._tabs[idx]
-        if tab.modified:
-            ans = messagebox.askyesnocancel("Unsaved", f"Save {tab.name()} before closing?")
-            if ans is None: return
-            if ans: self.save_file()
+        if not self._confirm_discard(tab):
+            return
 
         tab.frame.destroy()
         self._tabs.pop(idx)
@@ -650,6 +655,21 @@ class GravLangIDE:
         new_idx = min(idx, len(self._tabs) - 1)
         self._active_idx = -1
         self.switch_tab(new_idx)
+
+    def _confirm_discard(self, tab: EditorTab) -> bool:
+        """Ask to save *tab* if modified; False means the user cancelled."""
+        if not tab.modified:
+            return True
+        ans = messagebox.askyesnocancel("Unsaved", f"Save {tab.name()} before closing?")
+        if ans is None:
+            return False
+        return self.save_file(tab) if ans else True
+
+    def _on_quit(self):
+        for tab in list(self._tabs):
+            if not self._confirm_discard(tab):
+                return
+        self.root.destroy()
 
     def _active_tab(self) -> EditorTab | None:
         if 0 <= self._active_idx < len(self._tabs):
@@ -670,6 +690,21 @@ class GravLangIDE:
 
     def open_file_path(self, path: str):
         norm_path = os.path.abspath(path)
+
+        # already open? just switch to it
+        for i, tab in enumerate(self._tabs):
+            if tab.filepath and os.path.abspath(tab.filepath) == norm_path:
+                self.switch_tab(i)
+                return
+
+        # read first: a failed open must not touch recents or hide the welcome view
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+            return
+
         if norm_path in self._recent_files:
             self._recent_files.remove(norm_path)
         self._recent_files.insert(0, norm_path)
@@ -681,38 +716,8 @@ class GravLangIDE:
             self._welcome_view.set_recent_files(self._recent_files)
             self._welcome_view.pack_forget()
 
-        # check if already open
-        for i, tab in enumerate(self._tabs):
-            if tab.filepath == path or tab.filepath == norm_path:
-                self.switch_tab(i)
-                return
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            return
         tab = self._active_tab()
-        if tab and not tab.modified and not tab.get_content().strip():
-            tab.filepath = path
-            tab.set_content(content)
-            self._refresh_tab_labels()
-            self._update_title()
-            self._update_status_file()
-        else:
-            self.new_tab(filepath=path, content=content)
-        for i, tab in enumerate(self._tabs):
-            if tab.filepath == path:
-                self.switch_tab(i)
-                return
-        try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.read()
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            return
-        tab = self._active_tab()
-        if tab and not tab.modified and not tab.get_content().strip():
+        if tab and not tab.filepath and not tab.modified and not tab.get_content().strip():
             tab.filepath = path
             tab.set_content(content)
             self._refresh_tab_labels()
@@ -721,23 +726,27 @@ class GravLangIDE:
         else:
             self.new_tab(filepath=path, content=content)
 
-    def save_file(self):
-        tab = self._active_tab()
-        if not tab: return
-        if not tab.filepath:
+    def save_file(self, tab: EditorTab | None = None) -> bool:
+        """Save *tab* (default: the active one). Returns True if written."""
+        tab = tab or self._active_tab()
+        if not tab: return False
+        path = tab.filepath
+        if not path:
             path = filedialog.asksaveasfilename(
                 defaultextension=".grav",
                 filetypes=[("GravLang", "*.grav"), ("All", "*.*")])
-            if not path: return
-            tab.filepath = path
+            if not path: return False
         try:
-            with open(tab.filepath, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(tab.get_content())
-            tab.modified = False
-            self._refresh_tab_labels()
-            self._update_title()
         except Exception as e:
             messagebox.showerror("Error", str(e))
+            return False
+        tab.filepath = path
+        tab.modified = False
+        self._refresh_tab_labels()
+        self._update_title()
+        return True
 
     def format_code(self):
         tab = self._active_tab()
@@ -772,6 +781,7 @@ class GravLangIDE:
             self._step_event.set()
             return
             
+        run_tab = tab   # breakpoints / highlighting belong to the tab being run
         self._is_stepping = is_stepping
         self._last_paused_line = -1
 
@@ -891,8 +901,7 @@ class GravLangIDE:
                 def _on_step_hook(line, env):
                     if self._cancel_flag:
                         raise ExecutionStopped()
-                    active_tab = self._active_tab()
-                    is_bp = active_tab and (line in active_tab.breakpoints)
+                    is_bp = line in run_tab.breakpoints
 
                     if is_bp and line != self._last_paused_line:
                         self._is_stepping = True
@@ -907,8 +916,8 @@ class GravLangIDE:
                     
                     def _update_ui():
                         self._inspector.populate(store)
-                        tab = self._active_tab()
-                        if tab:
+                        if run_tab in self._tabs:
+                            tab = run_tab
                             tab.editor.tag_remove("step_highlight", "1.0", "end")
                             tab.editor.tag_add("step_highlight", f"{line}.0", f"{line}.end")
                             tab.editor.see(f"{line}.0")
@@ -925,7 +934,8 @@ class GravLangIDE:
 
                 if stages_ref is not None:
                     # Wrap Interpreter to intercept variable declarations/assignments
-                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code, on_step=_on_step_hook)
+                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code,
+                                        on_step=_on_step_hook, cancel_check=lambda: self._cancel_flag)
 
                     _orig_vd  = getattr(interp, "_visit_VarDecl", None)
                     _orig_as  = getattr(interp, "_visit_Assign", None)
@@ -988,7 +998,8 @@ class GravLangIDE:
                     # Note: we skip wrapping FuncCall as it would double-eval args
 
                 else:
-                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code, on_step=_on_step_hook)
+                    interp = Interpreter(print_fn=capture, input_fn=gui_input_fn, source=code,
+                                         on_step=_on_step_hook, cancel_check=lambda: self._cancel_flag)
 
                 interp.interpret(ast_tree)
                 elapsed = time.time() - t_start
@@ -1070,7 +1081,7 @@ class GravLangIDE:
         else:
             self._append_output(f"✓ Done in {elapsed:.3f}s\n", "timing")
             self._set_status_done(elapsed)
-        if store is not None:
+        if store:   # keep the last inspected state when a run fails or is stopped
             self._inspector.populate(store)
             self._update_scope_stats(store)
 
@@ -1211,10 +1222,13 @@ class GravLangIDE:
         """Toggle maximize / restore natively."""
         self._is_maximized = not getattr(self, "_is_maximized", False)
 
-        if self._is_maximized:
-            self.root.state('zoomed')
-        else:
-            self.root.state('normal')
+        try:
+            if self._is_maximized:
+                self.root.state('zoomed')            # Windows / macOS
+            else:
+                self.root.state('normal')
+        except tk.TclError:
+            self.root.attributes('-zoomed', self._is_maximized)   # X11
 
         # Update button symbol  □ ↔ ❐
         if hasattr(self, "_win_btns") and len(self._win_btns) > 1:
@@ -1253,14 +1267,13 @@ class GravLangIDE:
         code = SAMPLES[name]
         tab  = self._active_tab()
         if tab and not tab.get_content().strip().replace("# New GravLang file", "").strip():
-            tab.set_content(code)
-            tab.filepath = f"{name.lower().replace(' ','_')}.grav"
+            tab.set_content(code)   # no filepath: Ctrl+S asks where to save instead of
+            tab.filepath = ""       # silently writing <sample>.grav into the cwd
             tab.modified = False
             self._refresh_tab_labels()
             self._update_title()
         else:
-            fname = f"{name.lower().replace(' ','_')}.grav"
-            new_tab = self.new_tab(filepath=fname, content=code)
+            new_tab = self.new_tab(content=code)
             new_tab.modified = False
             self._refresh_tab_labels()
 
@@ -1281,11 +1294,43 @@ class GravLangIDE:
         except Exception:
             pass
 
+    _COLOR_OPTS = ("bg", "fg", "activebackground", "activeforeground", "insertbackground",
+                   "highlightbackground", "highlightcolor", "selectbackground",
+                   "selectforeground", "troughcolor", "disabledforeground")
+
+    def _retheme_widgets(self, widget, mapping: dict):
+        """Swap any colour option holding an old-theme value for the new theme's."""
+        for opt in self._COLOR_OPTS:
+            try:
+                cur = str(widget.cget(opt)).lower()
+            except tk.TclError:
+                continue
+            if cur in mapping:
+                try:
+                    widget.configure(**{opt: mapping[cur]})
+                except tk.TclError:
+                    pass
+        for child in widget.winfo_children():
+            self._retheme_widgets(child, mapping)
+
     def apply_theme(self, name: str):
         if name not in THEMES: return
+        old = self.theme
+        mapping: dict[str, str] = {}
+        for key, val in old.items():
+            if isinstance(val, str) and key in THEMES[name]:
+                mapping.setdefault(val.lower(), THEMES[name][key])
         self.theme_name = name
         self.theme = THEMES[name]
         t = self.theme
+        self._retheme_widgets(self.root, mapping)
+        self._bottom_panel.apply_theme(t)
+        if hasattr(self, "_welcome_view"):
+            self._welcome_view.apply_theme(t)
+        if self._stages_win and self._stages_win.is_open():
+            self._stages_win.theme = t
+            self._stages_win._on_close()
+            self._stages_win = CompilerStagesWindow(self.root, t)
         self._save_config()
         # Update all major widgets
         self._titlebar.configure(bg=t["BG_MANTLE"])
@@ -1406,6 +1451,11 @@ class GravLangIDE:
         r.bind("<Control-o>",    lambda e: self.open_file())
         r.bind("<Control-s>",    lambda e: self.save_file())
         r.bind("<Control-t>",    lambda e: self.new_tab())
+        r.bind("<Control-n>",    lambda e: self.new_tab())
+        r.bind("<Control-r>",    lambda e: self.run_code())
+        r.bind("<F10>",          lambda e: self.step_code())
+        r.bind("<Control-Shift-F>", lambda e: self.format_code())
+        r.bind("<Control-Shift-f>", lambda e: self.format_code())
         r.bind("<Control-w>",    lambda e: self.close_tab(self._active_idx))
         r.bind("<Control-Tab>",  lambda e: self.switch_tab(
             (self._active_idx + 1) % max(1, len(self._tabs))))
@@ -1538,6 +1588,7 @@ def launch_gui():
     # so the window stays in the taskbar and Alt+Tab.
     app = GravLangIDE(root)
     root.update()   # ensure HWND is fully created before calling DWM
-    _hide_titlebar_windows(root)
+    if sys.platform == "win32":   # DWM / SetWindowLong tricks are Windows-only
+        _hide_titlebar_windows(root)
 
     root.mainloop()

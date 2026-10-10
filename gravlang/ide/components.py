@@ -256,9 +256,10 @@ class AutoCompletePopup:
         return self.popup is not None
 
 class FindReplaceBar(tk.Frame):
-    def __init__(self, parent, editor_getter, theme, **kw):
+    def __init__(self, parent, editor_getter, theme, on_edit=None, **kw):
         super().__init__(parent, **kw)
         self._editor_getter = editor_getter
+        self._on_edit = on_edit   # called after Replace / Replace All changed the text
         self.theme = theme
         self._matches: list = []
         self._cur_idx: int  = -1
@@ -393,24 +394,27 @@ class FindReplaceBar(tk.Frame):
 
     def _replace_one(self):
         editor = self._editor_getter()
-        if not editor or self._cur_idx < 0: return
+        if not editor or not (0 <= self._cur_idx < len(self._matches)): return
         pos = self._matches[self._cur_idx]
         q   = self.find_var.get()
         r   = self.replace_var.get()
         editor.delete(pos, f"{pos}+{len(q)}c")
         editor.insert(pos, r)
         self._do_find()
+        if self._on_edit: self._on_edit()
 
     def _replace_all(self):
         editor = self._editor_getter()
-        if not editor: return
         q = self.find_var.get()
+        if not editor or not q: return   # an empty query would match between every character
         r = self.replace_var.get()
-        content = editor.get("1.0", "end-1c")
-        new_content = re.sub(re.escape(q), r, content, flags=re.IGNORECASE)  # FIXED: case-insensitive replace
-        editor.delete("1.0", "end")
-        editor.insert("1.0", new_content)
         self._do_find()
+        # replace back-to-front so earlier match positions stay valid; keeps cursor/scroll/undo
+        for pos in reversed(self._matches):
+            editor.delete(pos, f"{pos}+{len(q)}c")
+            editor.insert(pos, r)
+        self._do_find()
+        if self._on_edit: self._on_edit()
 
 class VariableInspector(tk.Frame):
     def __init__(self, parent, theme, **kw):
@@ -477,8 +481,19 @@ class VariableInspector(tk.Frame):
             return str(val), t["MAUVE"]
         if isinstance(val, str):
             return f'"{val}"', t["GREEN"]
+        if val is None:
+            return "null", t["LAVENDER"]
         if isinstance(val, list):
             return f"[{len(val)} items]", t["MAUVE"]
+        if isinstance(val, dict):
+            return f"{{{len(val)} keys}}", t["MAUVE"]
+        decl = getattr(val, "decl", None)          # GravLang function / lambda
+        if decl is not None and hasattr(val, "closure"):
+            return f"ƒ {decl.name}({', '.join(decl.params)})", t["PEACH"]
+        if hasattr(val, "methods") and hasattr(val, "parent"):   # class
+            return f"class {val.name}", t["PEACH"]
+        if hasattr(val, "klass") and hasattr(val, "fields"):     # instance
+            return f"{val.klass.name} {{{len(val.fields)} fields}}", t["PEACH"]
         if callable(val):
             name = getattr(val, "__name__", "?")
             return f"ƒ {name}", t["PEACH"]
@@ -603,10 +618,27 @@ class FileExplorer(tk.Frame):
 
     def _new_file(self):
         name = _simple_dialog(self.winfo_toplevel(), "New File", "Filename:")
-        if name:
-            full = os.path.join(self._cwd, name)
-            open(full, "a", encoding="utf-8").close()
-            self.refresh()
+        if not name:
+            return
+        if not self._valid_name(name):
+            return
+        full = os.path.join(self._cwd, name)
+        if os.path.exists(full):
+            messagebox.showerror("New File", f"'{name}' already exists.")
+            return
+        try:
+            open(full, "w", encoding="utf-8").close()
+        except OSError as e:
+            messagebox.showerror("New File", str(e))
+            return
+        self.refresh()
+
+    @staticmethod
+    def _valid_name(name: str) -> bool:
+        if not name.strip() or os.path.basename(name) != name or name in (".", ".."):
+            messagebox.showerror("Invalid name", f"'{name}' is not a valid file name.")
+            return False
+        return True
 
     def _rename(self):
         sel = self.tree.selection()
@@ -614,12 +646,23 @@ class FileExplorer(tk.Frame):
         vals = self.tree.item(sel[0], "values")
         if not vals: return
         old = vals[0]
+        if sel[0] == "__root__":
+            messagebox.showinfo("Rename", "The root folder can't be renamed here.")
+            return
         new_name = _simple_dialog(self.winfo_toplevel(), "Rename", "New name:",
                                   initial=os.path.basename(old))
-        if new_name:
-            new_path = os.path.join(os.path.dirname(old), new_name)
+        if not new_name or new_name == os.path.basename(old) or not self._valid_name(new_name):
+            return
+        new_path = os.path.join(os.path.dirname(old), new_name)
+        if os.path.exists(new_path):
+            messagebox.showerror("Rename", f"'{new_name}' already exists.")
+            return
+        try:
             os.rename(old, new_path)
-            self.refresh()
+        except OSError as e:
+            messagebox.showerror("Rename", str(e))
+            return
+        self.refresh()
 
     def _delete(self):
         sel = self.tree.selection()
@@ -627,11 +670,14 @@ class FileExplorer(tk.Frame):
         vals = self.tree.item(sel[0], "values")
         if not vals: return
         path = vals[0]
+        if not os.path.isfile(path):
+            messagebox.showinfo("Delete", "Only files can be deleted from the explorer.")
+            return
         if messagebox.askyesno("Delete", f"Delete {os.path.basename(path)}?"):
             try:
                 os.remove(path)
-            except Exception:
-                pass
+            except OSError as e:
+                messagebox.showerror("Delete", str(e))
             self.refresh()
 
 def _simple_dialog(parent, title, prompt, initial=""):

@@ -231,4 +231,6 @@ class WelcomeView(tk.Frame):
 
     def apply_theme(self, theme: dict):
         self.theme = theme
+        for child in self.winfo_children():
+            child.destroy()
         self._build()
