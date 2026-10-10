@@ -28,7 +28,7 @@ jobs:
         
     - name: Build executable
       run: |
-        python -m PyInstaller --onefile --name GravLang main.py
+        python -m PyInstaller --onefile --name GravLang --add-data "gravlang/lib;gravlang/lib" main.py
         
     - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v3

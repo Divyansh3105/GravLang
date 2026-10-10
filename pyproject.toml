@@ -35,6 +35,9 @@ gravlang-ide = "gravlang.ide.main_window:launch_gui"
 where = ["."]
 include = ["gravlang*"]
 
+[tool.setuptools.package-data]
+gravlang = ["lib/*.grav"]
+
 [tool.pyright]
 extraPaths = [".", "tests"]
 executionEnvironments = [
