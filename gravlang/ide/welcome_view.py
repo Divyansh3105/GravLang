@@ -3,6 +3,9 @@ import os
 from .themes import THEMES
 
 
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
 class WelcomeView(tk.Frame):
     """Sleek dark-mode Welcome & Quick Start Dashboard."""
 
@@ -92,7 +95,10 @@ class WelcomeView(tk.Frame):
         ).pack(anchor="w", padx=12, pady=(16, 6))
 
         for name, rel_path in self.DEMOS:
-            full_path = os.path.abspath(rel_path)
+            # demos live next to the package, not in the process's cwd
+            full_path = os.path.join(_PROJECT_ROOT, rel_path)
+            if not os.path.isfile(full_path):
+                continue   # not shipped (e.g. pip install): don't offer a dead button
             self._build_action_btn(
                 col1,
                 name,

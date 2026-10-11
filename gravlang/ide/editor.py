@@ -209,6 +209,13 @@ class EditorTab:
         indent = len(line_text) - len(line_text.lstrip())
         stripped = line_text.strip()
         extra = 4 if stripped.endswith("{") else 0
+        if extra and self.editor.get("insert", "insert+1c") == "}":
+            # Enter between `{` and `}`: body line in the middle, `}` on its own line
+            row = int(idx.split(".")[0])
+            pad = " " * (indent + extra)
+            self.editor.insert(idx, "\n" + pad + "\n" + " " * indent)
+            self.editor.mark_set("insert", f"{row + 1}.{len(pad)}")
+            return "break"
         self.editor.insert(idx, "\n" + " " * (indent + extra))
         return "break"
 
@@ -641,6 +648,10 @@ class EditorTab:
         self._prune_folds(fold_ranges)
         breakpoints = self.breakpoints
         folded = self.folded_blocks
+        hidden: set[int] = set()   # lines inside folded blocks take no gutter space
+        for start in folded:
+            if start in fold_ranges:
+                hidden.update(range(start + 1, fold_ranges[start] + 1))
 
         # Draw vertical gutter divider line on right edge
         canvas_h = self.ln_canvas.winfo_height() or 800
@@ -652,6 +663,11 @@ class EditorTab:
             _, dy, _, dh, _ = dline
             linenum = i.split(".")[0]
             line_int = int(linenum)
+            if line_int in hidden:
+                next_i = self.editor.index(f"{i}+1line")
+                if next_i == i: break
+                i = next_i
+                continue
             cy = dy + dh // 2
             is_active = (linenum == cur_row)
 

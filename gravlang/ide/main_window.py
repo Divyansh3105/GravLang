@@ -1156,6 +1156,8 @@ class GravLangIDE:
             vars_count = 0
             obj_count = 0
         else:
+            # builtins / print wrapper are Python callables, not user variables
+            store = {k: v for k, v in store.items() if not (callable(v) and not isinstance(v, type))}
             vars_count = len(store)
             obj_count = sum(
                 1 for v in store.values()

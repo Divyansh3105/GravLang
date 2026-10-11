@@ -228,8 +228,9 @@ class CompilerStagesWindow:
 
         # Color map for token families
         KW = {"LET","IF","ELIF","ELSE","WHILE","FOR","FUNC","RETURN",
-              "CLASS","EXTENDS","BREAK","CONTINUE","IN","SELF","PRINT"}
-        LITS = {"INT","FLOAT","STRING","TRUE","FALSE","NULL"}
+              "CLASS","EXTENDS","BREAK","CONTINUE","IN","SELF","PRINT",
+              "TRY","CATCH","FINALLY","THROW","IMPORT"}
+        LITS = {"INT","FLOAT","STRING","FSTRING","TRUE","FALSE","NULL"}
         OPS  = {"PLUS","MINUS","STAR","SLASH","MOD","FLOORDIV","POWER",
                 "EQ","NEQ","LT","GT","LE","GE","ASSIGN",
                 "PLUS_ASSIGN","MINUS_ASSIGN","STAR_ASSIGN","SLASH_ASSIGN",
