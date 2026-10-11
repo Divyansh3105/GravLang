@@ -153,6 +153,8 @@ class Parser:
             elif_clauses.append((elif_cond, elif_body))
 
         else_body = None
+        if self._current().type == "ELSE" and self._peek(1).type == "IF":
+            raise ParseError("Use 'elif' instead of 'else if'", self._current().line)
         if self._match("ELSE"):
             else_body = self._block()
 
@@ -423,8 +425,9 @@ class Parser:
                 )
             methods.append(self._func_decl(method=True))
 
-        self._expect("RBRACE", "Expected '}' after class body")
-        return ast.ClassDecl(name=name_tok.value, parent=parent, methods=methods, line=line)
+        close = self._expect("RBRACE", "Expected '}' after class body")
+        return ast.ClassDecl(name=name_tok.value, parent=parent, methods=methods,
+                             line=line, end_line=close.line)
 
     # ── expression statement ─────────────────────────────────────────
     # Handles:   expr ;   id = expr ;   id += expr ;
@@ -497,8 +500,8 @@ class Parser:
             if self._match("SEMI"):
                 continue
             stmts.append(self._statement())
-        self._expect("RBRACE", "Expected '}'")
-        return ast.Block(statements=stmts)
+        close = self._expect("RBRACE", "Expected '}'")
+        return ast.Block(statements=stmts, end_line=close.line)
 
     # ── expressions (precedence climbing) ────────────────────────────
 
@@ -681,6 +684,8 @@ class Parser:
             return ast.SelfExpr(line=tok.line)
         if tok.type == "PRINT":
             self._advance()
+            if self._current().type != "LPAREN":   # `print` used as a value
+                return ast.Identifier(name="print", line=tok.line)
             return self._finish_call("print", tok.line)
         if tok.type == "ID":
             self._advance()

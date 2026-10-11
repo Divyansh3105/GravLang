@@ -162,6 +162,8 @@ class Formatter:
         out: list[str] = []
         for i, line in enumerate(self._lines):
             indent = line[:len(line) - len(line.lstrip())]
+            if line.lstrip().startswith("}"):   # comment ahead of a closer belongs to the body
+                indent += " " * self._indent_width
             out.extend(indent + c for c in before.get(i, ()))
             out.append(line + "".join("  " + c for c in trail.get(i, ())))
         out.extend(tail)
@@ -172,12 +174,26 @@ class Formatter:
     def _indent(self) -> str:
         return " " * (self._indent_width * self._level)
 
-    def _emit(self, text: str) -> None:
-        """Append a line at the current indentation level."""
-        src = None
-        if self._cur is not None and self._cur not in self._anchored:
+    @staticmethod
+    def _last_end(*blocks):
+        """Source line of the closing brace of the last block that exists."""
+        for b in reversed(blocks):
+            if b is not None:
+                return getattr(b, "end_line", 0) or None
+        return None
+
+    def _emit(self, text: str, src: int | None = None) -> None:
+        """Append a line at the current indentation level.
+
+        *src* is the source line this output line corresponds to (default: the
+        statement being formatted); each source line is anchored only once.
+        """
+        if src is None:
             src = self._cur
+        if src is not None and src not in self._anchored:
             self._anchored.add(src)
+        else:
+            src = None
         self._lines.append(f"{self._indent()}{text}")
         self._src.append(src)
 
@@ -248,7 +264,7 @@ class Formatter:
             for s in node.else_body.statements:
                 self._fmt_stmt(s)
             self._level -= 1
-        self._emit("}")
+        self._emit("}", src=self._last_end(node.body, *[b for _, b in node.elif_clauses], node.else_body))
 
     def _fmt_WhileStmt(self, node: ast.WhileStmt) -> None:
         cond = self._fmt_expr(node.condition)
@@ -269,7 +285,7 @@ class Formatter:
             for s in node.finally_body.statements:
                 self._fmt_stmt(s)
             self._level -= 1
-        self._emit("}")
+        self._emit("}", src=self._last_end(node.body, node.else_body, node.finally_body))
 
     def _fmt_ForStmt(self, node: ast.ForStmt) -> None:
         # init may be a VarDecl (without trailing ;) or Assign / AugAssign
@@ -293,7 +309,7 @@ class Formatter:
             for s in node.finally_body.statements:
                 self._fmt_stmt(s)
             self._level -= 1
-        self._emit("}")
+        self._emit("}", src=self._last_end(node.body, node.else_body, node.finally_body))
 
     def _fmt_for_init(self, node) -> str:
         """Emit the init clause of a for-loop (no trailing semicolon)."""
@@ -328,7 +344,7 @@ class Formatter:
             for s in node.finally_body.statements:
                 self._fmt_stmt(s)
             self._level -= 1
-        self._emit("}")
+        self._emit("}", src=self._last_end(node.body, node.else_body, node.finally_body))
 
     def _fmt_FuncDecl(self, node: ast.FuncDecl) -> None:
         params_str = self._fmt_params(node.params, node.variadic)
@@ -337,7 +353,7 @@ class Formatter:
         for s in node.body.statements:
             self._fmt_stmt(s)
         self._level -= 1
-        self._emit("}")
+        self._emit("}", src=self._last_end(node.body))
 
     def _fmt_params(self, params: list[str], variadic: str | None) -> str:
         parts = list(params)
@@ -385,7 +401,7 @@ class Formatter:
             for s in node.finally_body.statements:
                 self._fmt_stmt(s)
             self._level -= 1
-        self._emit("}")
+        self._emit("}", src=self._last_end(node.try_body, node.catch_body, node.finally_body))
 
     def _fmt_ClassDecl(self, node: ast.ClassDecl) -> None:
         header = f"class {node.name}"
@@ -398,7 +414,7 @@ class Formatter:
                 self._blank()  # blank line between methods
             self._fmt_stmt(method)
         self._level -= 1
-        self._emit("}")
+        self._emit("}", src=node.end_line or None)
 
     def _fmt_Block(self, node: ast.Block) -> None:
         """Format a bare block (not usually a top-level statement)."""

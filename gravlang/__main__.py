@@ -28,6 +28,9 @@ def run_file(path: str) -> None:
     except FileNotFoundError:
         print(f"Error: file not found — {path}")
         sys.exit(1)
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"Error: cannot read {path}: {e}")
+        sys.exit(1)
 
     try:
         tokens = Lexer(source).tokenize()
@@ -101,7 +104,12 @@ def main():
         if isinstance(stream, io.TextIOWrapper):
             stream.reconfigure(errors="replace")
     if len(sys.argv) > 1:
-        if sys.argv[1] == "--repl":
+        if sys.argv[1] in ("-h", "--help"):
+            print(__doc__.strip())
+        elif sys.argv[1] in ("-V", "--version"):
+            from . import __version__
+            print(f"GravLang {__version__}")
+        elif sys.argv[1] == "--repl":
             repl()
         elif sys.argv[1] == "fmt":
             from .core.formatter import _cli

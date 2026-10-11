@@ -56,6 +56,10 @@ def _builtin_type(value):
         return "array"
     if isinstance(value, dict):
         return "dict"
+    if hasattr(value, "methods") and hasattr(value, "parent"):
+        return "class"
+    if (hasattr(value, "decl") and hasattr(value, "closure")) or callable(value):
+        return "function"
     return "unknown"
 
 

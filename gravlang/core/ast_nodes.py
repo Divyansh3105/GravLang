@@ -195,6 +195,7 @@ class ThrowStmt:
 class Block:
     """A { ... } block containing a list of statements."""
     statements: list = field(default_factory=list)
+    end_line: int = field(default=0, compare=False)   # line of the closing '}'
 
 
 # ── Expressions ─────────────────────────────────────────────────────
@@ -313,6 +314,7 @@ class ClassDecl:
     parent: str | None = None
     methods: list = field(default_factory=list)
     line: int = 0
+    end_line: int = field(default=0, compare=False)   # line of the closing '}'
 
 
 @dataclass

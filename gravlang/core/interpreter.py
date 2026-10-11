@@ -19,6 +19,10 @@ from .gravlang_class import GravLangClass, GravLangInstance
 # Python recursion limit needed so our own call-depth check always fires first
 _PY_RECURSION_LIMIT = 5000
 
+# Guards against programs that would exhaust memory / time in one operator
+_MAX_POW_EXPONENT = 100_000
+_MAX_SEQ_LEN = 100_000_000
+
 # Statement-like nodes that trigger the debugger's on_step hook
 _STEP_NODES = frozenset({
     "VarDecl", "Assign", "AugAssign", "IfStmt", "WhileStmt",
@@ -90,6 +94,9 @@ class Interpreter:
         """
         if sys.getrecursionlimit() < _PY_RECURSION_LIMIT:
             sys.setrecursionlimit(_PY_RECURSION_LIMIT)
+        # Python refuses to print ints over 4300 digits (e.g. factorial(2000)); lift that
+        if hasattr(sys, "get_int_max_str_digits") and sys.get_int_max_str_digits() != 0:
+            sys.set_int_max_str_digits(0)
 
         self.global_env = Environment()
         register_builtins(self.global_env)
@@ -167,7 +174,7 @@ class Interpreter:
             self._visitors[cls] = visitor
         try:
             return visitor(node, env)
-        except (TypeError, ZeroDivisionError, OverflowError, ValueError) as e:
+        except (TypeError, ZeroDivisionError, OverflowError, ValueError, MemoryError) as e:
             # Python-level failures (e.g. -"a", 0 ** -1) become catchable GravLang errors
             line = getattr(node, 'line', None)
             raise GravLangRuntimeError(str(e), line, self._get_source_line(line)) from None
@@ -440,6 +447,7 @@ class Interpreter:
             _module_cache=self._module_cache,
             print_fn=self._print_fn,
             input_fn=self._input_fn,
+            cancel_check=self._cancel_check,
         )
         child.interpret(tree)
 
@@ -557,7 +565,14 @@ class Interpreter:
                         return _builtin_toString(left) + _builtin_toString(right)
                     return left + right
                 case "-":  return left - right
-                case "*":  return left * right
+                case "*":
+                    for seq, n in ((left, right), (right, left)):
+                        if (isinstance(seq, (str, list)) and isinstance(n, int)
+                                and len(seq) * max(n, 0) > _MAX_SEQ_LEN):
+                            raise GravLangRuntimeError(
+                                "Result of '*' is too large", node.line,
+                                self._get_source_line(node.line))
+                    return left * right
                 case "/":
                     if right == 0:
                         raise GravLangRuntimeError("Division by zero", node.line,
@@ -574,6 +589,11 @@ class Interpreter:
                                                    self._get_source_line(node.line))
                     return left % right
                 case "**":
+                    if (isinstance(left, int) and isinstance(right, int)
+                            and abs(left) > 1 and right > _MAX_POW_EXPONENT):
+                        raise GravLangRuntimeError(
+                            f"Exponent too large (max {_MAX_POW_EXPONENT})", node.line,
+                            self._get_source_line(node.line))
                     result = left ** right
                     if isinstance(result, complex):
                         raise GravLangRuntimeError(

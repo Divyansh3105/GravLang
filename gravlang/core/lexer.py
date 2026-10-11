@@ -34,7 +34,7 @@ TOKEN_SPEC: list[tuple[str, str]] = [
     # Literals
     ("FLOAT",        r"\d+\.\d+"),
     ("INT",          r"\d+"),
-    ("FSTRING",       r'f"(?:[^"\\{}]|\\.|\{\{|\}\}|\{[^}]*\})*"'),  # f"Hello {name}!"
+    ("FSTRING",       r'f"(?:\{\{|\}\}|\{[^}]*\}|[^"\\{]|\\.)*"'),  # f"Hello {name}!"
     ("STRING",       r'"(?:[^"\\]|\\.)*"'),
 
 
@@ -118,6 +118,12 @@ _master_pattern = "|".join(
 _master_re = re.compile(_master_pattern)
 
 
+def _unexpected(ch: str) -> str:
+    if ch == '"':
+        return "Unterminated string literal"
+    return f"Unexpected character: {ch!r}"
+
+
 # ── Lexer class ──────────────────────────────────────────────────────
 
 class Lexer:
@@ -150,7 +156,7 @@ class Lexer:
                         pos = last_end + i
                         bad_line = self.source[:pos].count("\n") + 1
                         raise LexerError(
-                            f"Unexpected character: {ch!r}", bad_line,
+                            _unexpected(ch), bad_line,
                             self.get_line(bad_line),
                         )
             last_end = mo.end()  # FIXED: advance last_end past this match
@@ -187,7 +193,7 @@ class Lexer:
                     pos = last_end + i
                     bad_line = self.source[:pos].count("\n") + 1
                     raise LexerError(
-                        f"Unexpected character: {ch!r}", bad_line,
+                        _unexpected(ch), bad_line,
                         self.get_line(bad_line),
                     )
 
