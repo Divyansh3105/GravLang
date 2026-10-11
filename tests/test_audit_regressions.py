@@ -489,3 +489,85 @@ def test_status_counts_ignore_builtins(tk_root):
     it.interpret(Parser(Lexer("let a = 1; let b = [1];").tokenize()).parse())
     app._update_scope_stats(dict(it.global_env._store))
     assert "Vars: 2" in app._status_stats.cget("text")
+
+
+# ══ third audit pass ═════════════════════════════════════════════════
+
+@pytest.mark.parametrize("src", [
+    "(func(a) { return a; }) > 1;",                 # statement must not start with `func`
+    "(func() { return 1; })();",
+    "let o = null; (o.f)(1);",                       # call of a field vs. method call
+    "print((1)(2).a.b(3));",
+])
+def test_formatter_roundtrip_edge_cases(src):
+    out = format_source(src)
+    assert _ast(out) == _ast(src)
+    assert format_source(out) == out
+
+
+def test_python_type_names_do_not_leak():
+    for src in ('print(-"a");', "print(1 + null);", "let x = 1; x -= \"a\";"):
+        with pytest.raises(GravLangError) as ei:
+            run_grav(src)
+        msg = str(ei.value)
+        assert "NoneType" not in msg and "'str'" not in msg and "bad operand" not in msg
+
+
+def test_finished_run_clears_arrow_on_the_run_tab(tk_root):
+    from gravlang.ide.main_window import GravLangIDE
+    app = GravLangIDE(tk_root)
+    a = app.new_tab(content="let x = 1;")
+    a.set_paused_line(1)
+    app._run_tab = a
+    app.new_tab(content="# other")          # a is no longer the active tab
+    app._finish_run([], [], 0.0, {"x": 1})
+    assert a.paused_line is None
+
+
+# ══ theme switching ══════════════════════════════════════════════════
+
+def _all_widgets(w):
+    yield w
+    for c in w.winfo_children():
+        yield from _all_widgets(c)
+
+
+def test_theme_switch_leaves_no_stale_colours(tk_root):
+    """Every widget colour belongs to the active theme after any sequence of switches,
+    even after hovering buttons (hover handlers used to restore the old theme)."""
+    from tkinter import ttk
+    from gravlang.ide.main_window import GravLangIDE
+    app = GravLangIDE(tk_root)
+    app.new_tab(content="let x = 1;")
+    app._inspector.populate({"x": 1})
+    names = list(THEMES)
+    opts = ("bg", "fg", "activebackground", "activeforeground", "insertbackground",
+            "highlightbackground", "highlightcolor", "selectbackground", "selectforeground")
+    for name in names + names[::-1]:
+        app.apply_theme(name)
+        for b in app._toolbar.winfo_children():
+            if isinstance(b, tk.Button):
+                b.event_generate("<Enter>")
+                b.event_generate("<Leave>")
+        app._sash.event_generate("<Leave>")
+        app._clr_lbl.event_generate("<Leave>")
+        valid = {v.lower() for v in THEMES[name].values()}
+        stale = []
+        for w in _all_widgets(app.root):
+            if isinstance(w, tk.Toplevel) and w is not app.root:
+                continue
+            for opt in opts:
+                try:
+                    v = str(w.cget(opt)).lower()
+                except tk.TclError:
+                    continue
+                if v.startswith("#") and v not in valid:
+                    stale.append((w.winfo_class(), opt, v))
+        assert not stale, (name, stale[:5])
+        t = THEMES[name]
+        st = ttk.Style()
+        assert str(st.lookup("Exp.Treeview", "background")).lower() == t["BG_MANTLE"].lower()
+        assert str(st.lookup("Insp.Treeview", "background")).lower() == t["BG_MANTLE"].lower()
+        assert str(st.lookup("Vertical.TScrollbar", "troughcolor")).lower() == t["BG_MANTLE"].lower()
+        assert str(app._statusbar.cget("bg")).lower() == t["STATUS_BG"].lower()
+        assert str(app._status_stats.cget("bg")).lower() == t["STATUS_BG"].lower()
