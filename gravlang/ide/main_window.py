@@ -903,12 +903,10 @@ class GravLangIDE:
                         raise ExecutionStopped()
                     is_bp = line in run_tab.breakpoints
 
-                    if is_bp and line != self._last_paused_line:
+                    if is_bp:
                         self._is_stepping = True
 
                     if not getattr(self, "_is_stepping", False):
-                        return
-                    if line == self._last_paused_line:
                         return
 
                     self._last_paused_line = line

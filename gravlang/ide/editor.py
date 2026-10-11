@@ -58,9 +58,12 @@ class EditorTab:
         self._last_text: str = ""   # text at last key release; only real edits set `modified`
         self._on_change = on_change_cb
         self._on_cursor = on_cursor_cb
-        self.breakpoints: set[int] = set()
+        # Breakpoints and folds are Tk marks, so they move with the text as lines
+        # are inserted/deleted above them (see the `breakpoints` / `folded_blocks` views).
+        self._bp_marks: list[str] = []
+        self._fold_marks: dict[str, str] = {}   # mark name -> elide tag name
+        self._mark_seq = 0
         self.paused_line: int | None = None
-        self.folded_blocks: set[int] = set()
         self._frame = tk.Frame(parent_frame, bg=theme["BG_BASE"])
         self._build()
 
@@ -514,6 +517,45 @@ class EditorTab:
                 i += 1
         return ranges
 
+    # ── mark-backed breakpoint / fold state ──────────────────────────────
+
+    def _line_of(self, mark: str) -> int:
+        return int(self.editor.index(mark).split(".")[0])
+
+    def _new_mark(self, prefix: str, line: int) -> str:
+        self._mark_seq += 1
+        name = f"{prefix}{self._mark_seq}"
+        self.editor.mark_set(name, f"{line}.0")
+        self.editor.mark_gravity(name, "right")   # stays with its line when text is inserted before it
+        return name
+
+    @property
+    def breakpoints(self) -> set[int]:
+        """Current line numbers of all breakpoints (read-only view)."""
+        return {self._line_of(m) for m in self._bp_marks}
+
+    @property
+    def folded_blocks(self) -> set[int]:
+        """Current start lines of all folded blocks (read-only view)."""
+        return {self._line_of(m) for m in self._fold_marks}
+
+    def _unfold_mark(self, mark: str):
+        tag = self._fold_marks.pop(mark)
+        self.editor.tag_delete(tag)
+        self.editor.mark_unset(mark)
+
+    def _prune_folds(self, fold_ranges: dict):
+        """Unfold blocks whose braces no longer exist (edited away)."""
+        for mark in [m for m in self._fold_marks if self._line_of(m) not in fold_ranges]:
+            self._unfold_mark(mark)
+
+    def _reset_marks(self):
+        for mark in list(self._fold_marks):
+            self._unfold_mark(mark)
+        for mark in self._bp_marks:
+            self.editor.mark_unset(mark)
+        self._bp_marks.clear()
+
     def toggle_fold(self, start_line: int) -> bool:
         ranges = self._find_fold_ranges()
         if start_line not in ranges:
@@ -524,15 +566,19 @@ class EditorTab:
         start_idx = f"{start_line + 1}.0"
         end_idx = f"{end_line}.end+1c"
 
-        if start_line in self.folded_blocks:
+        existing = [m for m in self._fold_marks if self._line_of(m) == start_line]
+        if existing:
             # Unfold / Expand
-            ed.tag_remove("folded_hidden", start_idx, end_idx)
-            self.folded_blocks.remove(start_line)
+            for mark in existing:
+                self._unfold_mark(mark)
             is_folded = False
         else:
-            # Fold / Collapse
-            ed.tag_add("folded_hidden", start_idx, end_idx)
-            self.folded_blocks.add(start_line)
+            # Fold / Collapse (own tag per block, so edits can't desync it)
+            mark = self._new_mark("fold", start_line)
+            tag = f"fold_hidden_{mark}"
+            ed.tag_configure(tag, elide=True)
+            ed.tag_add(tag, start_idx, end_idx)
+            self._fold_marks[mark] = tag
             is_folded = True
 
         self._update_line_numbers()
@@ -560,17 +606,24 @@ class EditorTab:
             pass
 
     def toggle_breakpoint(self, line: int) -> bool:
-        if line in self.breakpoints:
-            self.breakpoints.remove(line)
+        if not 1 <= line <= int(self.editor.index("end-1c").split(".")[0]):
+            return False   # no such line
+        here = [m for m in self._bp_marks if self._line_of(m) == line]
+        if here:
+            for mark in here:
+                self._bp_marks.remove(mark)
+                self.editor.mark_unset(mark)
             res = False
         else:
-            self.breakpoints.add(line)
+            self._bp_marks.append(self._new_mark("bp", line))
             res = True
         self._update_line_numbers()
         return res
 
     def clear_breakpoints(self):
-        self.breakpoints.clear()
+        for mark in self._bp_marks:
+            self.editor.mark_unset(mark)
+        self._bp_marks.clear()
         self._update_line_numbers()
 
     def _update_line_numbers(self):
@@ -585,6 +638,9 @@ class EditorTab:
         text_sub = t.get("TEXT_SUB", "#6c7086")
 
         fold_ranges = self._find_fold_ranges()
+        self._prune_folds(fold_ranges)
+        breakpoints = self.breakpoints
+        folded = self.folded_blocks
 
         # Draw vertical gutter divider line on right edge
         canvas_h = self.ln_canvas.winfo_height() or 800
@@ -600,7 +656,7 @@ class EditorTab:
             is_active = (linenum == cur_row)
 
             # 1. Breakpoint Dot (x=8)
-            if line_int in self.breakpoints:
+            if line_int in breakpoints:
                 self.ln_canvas.create_oval(
                     4, cy - 4, 12, cy + 4,
                     fill=red_color, outline=border_color, width=1
@@ -608,7 +664,7 @@ class EditorTab:
 
             # 2. Folding Chevron (x=20)
             if line_int in fold_ranges:
-                if line_int in self.folded_blocks:
+                if line_int in folded:
                     # Right arrow ▶ (collapsed)
                     self.ln_canvas.create_polygon(
                         17, cy - 4, 23, cy, 17, cy + 4,
@@ -676,6 +732,7 @@ class EditorTab:
         return self.editor.get("1.0", "end-1c")
 
     def set_content(self, text):
+        self._reset_marks()   # marks belong to the old text
         self.editor.delete("1.0", "end")
         self.editor.insert("1.0", text)
         self._highlight()
