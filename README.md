@@ -42,7 +42,7 @@ It includes both a command-line interpreter and a feature-rich, themeable **GUI 
 - **Multi-Paradigm Engine:** Procedural, functional (closures, lambdas), and object-oriented programming.
 - **Object-Oriented System:** Native classes, inheritance (`class Child extends Parent`), constructors (`init`), methods, overriding, and `self` references.
 - **Control Flow & Loops:** `if / elif / else`, `while / else / finally`, standard `for` loops, and collection iteration with `for (item in collection)`. Fully supports `break` and `continue`.
-- **First-Class Functions & Closures:** Higher-order functions, anonymous arrow syntax `(x, y) => x + y`, closures, and variadic rest parameters (`...rest`).
+- **First-Class Functions & Closures:** Higher-order functions, anonymous functions `func(x, y) { return x + y; }`, closures, and variadic rest parameters (`...rest`).
 - **Data Structures & Slicing:**
   - **Strings:** Double-quoted strings, slicing (`str[1:4]`, `str[2:]`, `str[:3]`), concatenation, indexing.
   - **F-Strings:** Native string interpolation (`f"Hello {name}, total: {a + b}"`).
@@ -57,7 +57,7 @@ It includes both a command-line interpreter and a feature-rich, themeable **GUI 
 
 GravLang includes a custom GUI IDE built with Tkinter:
 
-- **Themeable Interface:** Multiple themes including Catppuccin Mocha, Macchiato, Frappé, Latte, Dark, and Light.
+- **Themeable Interface:** Four themes: Catppuccin Mocha, GitHub Dark, Solarized Dark, and Catppuccin Latte.
 - **Multi-Tab Editor:** Tabbed interface with syntax highlighting, auto-completion popups, line numbering, code folding, and gutter breakpoints.
 - **Compiler Stages Visualizer:** Real-time side-by-side inspection pipeline:
   - **Lexer Tokens:** Token stream viewer.
@@ -149,26 +149,24 @@ pytest
 ## 📝 Language Syntax Overview
 
 ```gravlang
-// Classes & Inheritance
-class Person {
-    func init(name, age) {
+# Classes & Inheritance
+class Animal {
+    func init(name) {
         self.name = name;
-        self.age = age;
     }
 
-    func greet() {
-        return f"Hello, I am {self.name} and I am {self.age} years old.";
-    }
-}
-
-class Student extends Person {
-    func init(name, age, grade) {
-        super.init(name, age);
-        self.grade = grade;
+    func speak() {
+        print(f"{self.name} makes a noise.");
     }
 }
 
-// Function with Variadic Args & Lambda
+class Dog extends Animal {
+    func speak() {
+        print(f"{self.name} barks!");
+    }
+}
+
+# Function with variadic args & lambda
 func calculateTotal(multiplier, ...nums) {
     let sum = 0;
     for (n in nums) {
@@ -177,17 +175,19 @@ func calculateTotal(multiplier, ...nums) {
     return sum * multiplier;
 }
 
-let applyOp = (a, b) => a + b;
+let multiply = func(a, b) { return a * b; };
 
-// Main Logic & Error Handling
+# Main logic & error handling
 try {
-    let p = new Student("Alice", 20, "A+");
-    print(p.greet());
+    let pet = Dog("Fido");
+    pet.speak();
 
     let numbers = [10, 20, 30, 40];
-    let slice = numbers[1:3]; // [20, 30]
+    let slice = numbers[1:3]; # [20, 30]
+    print(slice);
 
     print(f"Total: {calculateTotal(2, 5, 10, 15)}");
+    print(f"Product: {multiply(4, 5)}");
 } catch (err) {
     print(f"Caught error: {err}");
 } finally {
