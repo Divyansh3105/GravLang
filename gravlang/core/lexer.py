@@ -29,7 +29,7 @@ TOKEN_SPEC: list[tuple[str, str]] = [
     # Whitespace & comments (skipped)
     ("COMMENT",      r"#[^\n]*"),
     ("NEWLINE",      r"\n"),
-    ("SKIP",         r"[ \t\r]+"),
+    ("SKIP",         r"[ \t\r\f\u00a0\ufeff]+"),  # incl. NBSP (pasted code) and a stray BOM
 
     # Literals
     ("FLOAT",        r"\d+\.\d+"),

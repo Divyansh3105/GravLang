@@ -656,7 +656,7 @@ def format_file(path: str, *, indent_width: int = 4) -> str:
     str
         Formatted source.
     """
-    with open(path, encoding="utf-8") as fh:
+    with open(path, encoding="utf-8-sig") as fh:
         source = fh.read()
     return format_source(source, indent_width=indent_width)
 
@@ -697,7 +697,7 @@ def _cli(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
 
     try:
-        with open(args.file, encoding="utf-8") as fh:
+        with open(args.file, encoding="utf-8-sig") as fh:
             original = fh.read()
         formatted = format_source(original, indent_width=args.indent)
     except FileNotFoundError:

@@ -437,7 +437,7 @@ class Interpreter:
 
         # ── 3. Read the module source ───────────────────────────────────
         try:
-            with open(abs_path, "r", encoding="utf-8") as fh:
+            with open(abs_path, "r", encoding="utf-8-sig") as fh:
                 source = fh.read()
         except OSError as exc:
             raise GravLangRuntimeError(

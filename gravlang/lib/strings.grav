@@ -31,16 +31,25 @@ func endsWith(s, suffix) {
 
 func capitalize(s) {
     if (len(s) == 0) { return s; }
-    return s[0] + s;   # placeholder — real impl needs char ops
+    let lower = "abcdefghijklmnopqrstuvwxyz";
+    let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    let i = 0;
+    while (i < 26) {
+        if (s[0] == lower[i]) { return upper[i] + s[1:]; }
+        i += 1;
+    }
+    return s;   # already capitalised or not a letter
 }
 
 func padLeft(s, width, ch) {
+    if (len(ch) == 0) { return s; }   # an empty pad would never reach the width
     let result = s;
     while (len(result) < width) { result = ch + result; }
     return result;
 }
 
 func padRight(s, width, ch) {
+    if (len(ch) == 0) { return s; }
     let result = s;
     while (len(result) < width) { result = result + ch; }
     return result;

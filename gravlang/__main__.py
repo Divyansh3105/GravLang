@@ -23,7 +23,7 @@ from .core.grav_builtins import _builtin_toString
 def run_file(path: str) -> None:
     """Lex → parse → interpret a .grav source file."""
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             source = f.read()
     except FileNotFoundError:
         print(f"Error: file not found — {path}")

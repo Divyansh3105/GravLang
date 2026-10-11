@@ -34,13 +34,7 @@ class MathLib {
     func sqrt(n) {
         if (n < 0) { return null; }
         if (n == 0) { return 0; }
-        let guess = n / 2.0;
-        let prev = 0.0;
-        while (self.abs(guess - prev) > 0.000001) {
-            prev = guess;
-            guess = (guess + n / guess) / 2.0;
-        }
-        return guess;
+        return n ** 0.5;
     }
 }
 

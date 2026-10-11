@@ -36,16 +36,9 @@ func pow(base, exp) {
 }
 
 func sqrt(n) {
-    # Newton-Raphson approximation (10 iterations)
     if (n < 0) { return null; }
     if (n == 0) { return 0; }
-    let x = n / 2.0;
-    let i = 0;
-    while (i < 10) {
-        x = (x + n / x) / 2.0;
-        i += 1;
-    }
-    return x;
+    return n ** 0.5;   # exact to float precision (fixed iteration counts were wrong for large n)
 }
 
 # ── Rounding ─────────────────────────────────────────────────────────
@@ -66,12 +59,24 @@ func round(n) {
 }
 
 # ── Factorial & Fibonacci ─────────────────────────────────────────────
+# iterative: the call-depth limit (200) would reject recursive versions for larger n
 func factorial(n) {
-    if (n <= 1) { return 1; }
-    return n * factorial(n - 1);
+    let result = 1;
+    let i = 2;
+    while (i <= n) { result *= i; i += 1; }
+    return result;
 }
 
 func fib(n) {
     if (n <= 1) { return n; }
-    return fib(n - 1) + fib(n - 2);
+    let a = 0;
+    let b = 1;
+    let i = 2;
+    while (i <= n) {
+        let next = a + b;
+        a = b;
+        b = next;
+        i += 1;
+    }
+    return b;
 }
