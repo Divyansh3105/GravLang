@@ -5,7 +5,7 @@ GravLang comes with a standard library of built-in functions available in the gl
 ## I/O
 
 - **`print(*args)`**
-  Outputs arguments to the console.
+  Outputs arguments to the console, separated by spaces. Values use GravLang spelling (`true`, `false`, `null`, `[1, "a"]`).
 
 - **`input(prompt="")`**
   Prompts the user for input and reads a line from stdin as a string.
@@ -16,7 +16,7 @@ GravLang comes with a standard library of built-in functions available in the gl
   Returns the length of a string, array, or dict. Raises an error for other types.
 
 - **`type(value)`**
-  Returns a string representing the type of the value (e.g., `"null"`, `"bool"`, `"int"`, `"float"`, `"string"`, `"array"`, `"dict"`, or the class name of an object).
+  Returns a string representing the type of the value (e.g., `"null"`, `"bool"`, `"int"`, `"float"`, `"string"`, `"array"`, `"dict"`, `"function"` (functions, lambdas and built-ins), `"class"`, or the class name of an object).
 
 - **`hasAttr(obj, name)`**
   Returns `true` if the given instance object has an attribute matching the `name` string.

@@ -225,7 +225,7 @@ class Formatter:
         try:
             if method is None:
                 # Fallback: try to emit as expression statement
-                self._emit(f"{self._fmt_expr(node)};")
+                self._emit(f"{self._stmt_text(node)};")
             else:
                 method(node)
         finally:
@@ -427,11 +427,17 @@ class Formatter:
 
     # ── expression-statement wrappers ────────────────────────────────────
 
+    def _stmt_text(self, node) -> str:
+        """An expression in statement position. A leading lambda would read as a
+        `func` declaration, so such statements are parenthesised."""
+        text = self._fmt_expr(node)
+        return f"({text})" if text.startswith("func(") else text
+
     def _fmt_FuncCall(self, node: ast.FuncCall) -> None:
-        self._emit(f"{self._fmt_expr(node)};")
+        self._emit(f"{self._stmt_text(node)};")
 
     def _fmt_MethodCall(self, node: ast.MethodCall) -> None:
-        self._emit(f"{self._fmt_expr(node)};")
+        self._emit(f"{self._stmt_text(node)};")
 
     def _fmt_ArrayAssign(self, node: ast.ArrayAssign) -> None:
         arr  = self._postfix_obj(node.array)
@@ -445,7 +451,7 @@ class Formatter:
         self._emit(f"{obj}.{node.attr} = {val};")
 
     def _fmt_CallExpr(self, node: ast.CallExpr) -> None:
-        self._emit(f"{self._fmt_expr(node)};")
+        self._emit(f"{self._stmt_text(node)};")
 
     # ── expression formatter (returns string) ─────────────────────────
 
@@ -513,6 +519,8 @@ class Formatter:
 
     def _expr_CallExpr(self, node: ast.CallExpr, _pop=None) -> str:
         callee = self._postfix_obj(node.callee)
+        if isinstance(node.callee, ast.AttributeGet):
+            callee = f"({callee})"   # `(o.f)(x)` calls a field; `o.f(x)` is a method call
         args = ", ".join(self._fmt_expr(a) for a in node.args)
         return f"{callee}({args})"
 

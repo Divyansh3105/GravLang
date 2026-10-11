@@ -45,7 +45,10 @@ Strings can be defined using double quotes `""`. GravLang also supports f-string
 ```js
 let name = "Alice";
 let greeting = f"Hello, {name}!";
+let braces = f"{{literal}} and {1 + 1}";   # {{ and }} produce literal braces
 ```
+
+Escape sequences are `\n`, `\t`, `\"` and `\\`; any other backslash sequence is kept as written.
 
 ### 4. Booleans
 `true` or `false` (case-sensitive).

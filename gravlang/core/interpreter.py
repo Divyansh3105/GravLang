@@ -12,12 +12,22 @@ import sys
 from typing import Callable
 from . import ast_nodes as ast
 from .environment import Environment
-from .grav_builtins import register_builtins, _builtin_toString
+from .grav_builtins import register_builtins, _builtin_toString, _builtin_type
 from .errors import GravLangError, GravLangRuntimeError, BreakSignal, ContinueSignal, ExecutionStopped
 from .gravlang_class import GravLangClass, GravLangInstance
 
 # Python recursion limit needed so our own call-depth check always fires first
 _PY_RECURSION_LIMIT = 5000
+
+# Python type names -> GravLang spelling, for error messages that quote them
+_TYPE_NAMES = {"NoneType": "null", "str": "string", "list": "array", "bool": "bool",
+               "GravLangInstance": "object", "GravFunction": "function",
+               "GravLangClass": "class", "function": "function", "builtin_function_or_method": "function"}
+
+
+def _grav_msg(msg: str) -> str:
+    return re.sub(r"'(\w+)'", lambda m: f"'{_TYPE_NAMES.get(m.group(1), m.group(1))}'", msg)
+
 
 # Guards against programs that would exhaust memory / time in one operator
 _MAX_POW_EXPONENT = 100_000
@@ -177,7 +187,7 @@ class Interpreter:
         except (TypeError, ZeroDivisionError, OverflowError, ValueError, MemoryError) as e:
             # Python-level failures (e.g. -"a", 0 ** -1) become catchable GravLang errors
             line = getattr(node, 'line', None)
-            raise GravLangRuntimeError(str(e), line, self._get_source_line(line)) from None
+            raise GravLangRuntimeError(_grav_msg(str(e)), line, self._get_source_line(line)) from None
 
     # ── statements ───────────────────────────────────────────────────
 
@@ -536,6 +546,10 @@ class Interpreter:
     def _visit_UnaryOp(self, node: ast.UnaryOp, env: Environment):
         operand = self._exec(node.operand, env)
         if node.op == "-":
+            if not isinstance(operand, (int, float)):
+                raise GravLangRuntimeError(
+                    f"Cannot negate {_builtin_type(operand)} value", node.line,
+                    self._get_source_line(node.line))
             return -operand
         if node.op == "not":
             return not self._truthy(operand)
@@ -610,7 +624,7 @@ class Interpreter:
                     raise GravLangRuntimeError(f"Unknown operator: {node.op}", node.line)
         except TypeError as e:
             raise GravLangRuntimeError(
-                f"Type error in '{node.op}': {e}",
+                f"Type error in '{node.op}': {_grav_msg(str(e))}",
                 node.line, self._get_source_line(node.line),
             )
 
