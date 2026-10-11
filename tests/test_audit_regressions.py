@@ -571,3 +571,144 @@ def test_theme_switch_leaves_no_stale_colours(tk_root):
         assert str(st.lookup("Vertical.TScrollbar", "troughcolor")).lower() == t["BG_MANTLE"].lower()
         assert str(app._statusbar.cget("bg")).lower() == t["STATUS_BG"].lower()
         assert str(app._status_stats.cget("bg")).lower() == t["STATUS_BG"].lower()
+
+
+# ══ fourth audit pass: CLI, stdlib, encodings ════════════════════════
+
+import subprocess
+import sys as _sys
+import os as _os
+
+_ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+
+
+def _cli(*args, cwd=None):
+    env = {**_os.environ, "PYTHONIOENCODING": "utf-8"}
+    return subprocess.run([_sys.executable, "-m", "gravlang", *args], cwd=cwd or _ROOT,
+                          capture_output=True, encoding="utf-8", env=env, timeout=30)
+
+
+def test_cli_runs_file_and_reports_errors(tmp_path):
+    ok = tmp_path / "ok.grav"
+    ok.write_text('print(true, [1, "a"]);')
+    r = _cli(str(ok))
+    assert r.returncode == 0 and r.stdout.strip() == 'true [1, "a"]'
+    bad = tmp_path / "bad.grav"
+    bad.write_text("let x = ;")
+    r = _cli(str(bad))
+    assert r.returncode == 1 and "Parse Error" in r.stdout
+    assert _cli(str(tmp_path / "nope.grav")).returncode == 1
+
+
+def test_cli_version_help_and_unreadable_file(tmp_path):
+    assert _cli("--version").stdout.startswith("GravLang ")
+    assert "Usage" in _cli("--help").stdout
+    binary = tmp_path / "bin.grav"
+    binary.write_bytes(b"\xff\xfe\x00")
+    r = _cli(str(binary))
+    assert r.returncode == 1 and "cannot read" in r.stdout
+
+
+def test_cli_fmt_check(tmp_path):
+    f = tmp_path / "a.grav"
+    f.write_text("let   x=1;")
+    assert _cli("fmt", str(f), "--check").returncode == 1
+    f.write_text("let x = 1;\n")
+    assert _cli("fmt", str(f), "--check").returncode == 0
+
+
+def test_cli_repl_multiline(tmp_path):
+    env = {**_os.environ, "PYTHONIOENCODING": "utf-8"}
+    r = subprocess.run([_sys.executable, "-m", "gravlang", "--repl"], cwd=_ROOT, env=env,
+                       input="func f() {\n return 7;\n}\nprint(f());\nexit\n",
+                       capture_output=True, encoding="utf-8", timeout=30)
+    assert "7" in r.stdout
+
+
+def test_utf8_bom_and_nbsp_are_accepted(tmp_path):
+    f = tmp_path / "bom.grav"
+    f.write_bytes(b"\xef\xbb\xbfprint(1);\r\nprint(2);\r\n")
+    assert _cli(str(f)).stdout.split() == ["1", "2"]
+    assert run_grav("print(1);" + chr(0xA0) + "print(2);") == ["1", "2"]
+    assert _cli("fmt", str(f)).returncode == 0
+
+
+def test_stdlib_modules(tmp_path):
+    src = '''
+import "lib/math.grav";
+import "lib/strings.grav";
+import "lib/std.grav";
+print(sqrt(1000000), sqrt(16), Math.sqrt(16), sqrt(0.0001));
+print(factorial(300) > 0, fib(30));
+print(capitalize("hello"), capitalize("Hi"), capitalize("1a"), capitalize(""));
+print(padLeft("7", 3, "0"), padRight("7", 3, "."), padLeft("ab", 5, ""), repeat("ab", 2));
+print(Strings.split("a,b,,c", ","), Strings.split("a--b", "--"), Strings.trim("  x "));
+'''
+    out = run_grav(src, path=str(tmp_path / "main.grav"))
+    assert out == [
+        "1000.0 4.0 4.0 0.01",
+        "true 832040",
+        "Hello Hi 1a ",
+        "007 7.. ab abab",
+        '["a", "b", "", "c"] ["a", "b"] x',
+    ]
+
+
+def test_undo_does_not_erase_a_loaded_file(tk_root):
+    tab = _editor(tk_root, "let x = 1;\n")
+    try:
+        tab.editor.edit_undo()
+    except tk.TclError:
+        pass                                   # nothing to undo is fine
+    assert tab.get_content() == "let x = 1;\n"
+
+
+def test_format_is_one_undo_step(tk_root):
+    from gravlang.ide.main_window import GravLangIDE
+    app = GravLangIDE(tk_root)
+    tab = app.new_tab(content="let   x=1;\nlet y   =2;\n")
+    tab.editor.insert("end-1c", "x;")                 # a real edit first
+    tab.editor.edit_separator()
+    before = tab.get_content()
+    app.format_code()
+    assert tab.get_content() != before and tab.modified
+    tab.editor.edit_undo()
+    assert tab.get_content() == before
+
+
+def test_autocomplete_hides_for_exact_match(tk_root):
+    tab = _editor(tk_root, "print")
+    tab.editor.mark_set("insert", "end-1c")
+    tab._maybe_autocomplete()
+    assert not tab._autocomplete.visible()          # Tab must indent, not "accept print"
+
+
+def test_config_is_per_user_not_next_to_the_code():
+    from gravlang.ide import themes
+    assert themes.CONFIG_FILE != themes.LEGACY_CONFIG_FILE
+    assert not themes.CONFIG_FILE.startswith(_os.path.dirname(themes.__file__))
+    assert _os.environ["GRAVLANG_CONFIG"] == themes.CONFIG_FILE      # tests never touch real settings
+
+
+def test_config_round_trip(tk_root, tmp_path, monkeypatch):
+    from gravlang.ide import main_window
+    from gravlang.ide.main_window import GravLangIDE
+    cfg = tmp_path / "sub" / "config.json"
+    monkeypatch.setattr(main_window, "CONFIG_FILE", str(cfg))
+    app = GravLangIDE(tk_root)
+    app.apply_theme("GitHub Dark")
+    assert cfg.exists() and '"GitHub Dark"' in cfg.read_text()
+    assert app._load_config()["theme"] == "GitHub Dark"
+
+
+def test_output_flushes_in_batches_and_is_capped(tk_root):
+    from gravlang.ide.main_window import GravLangIDE
+    from gravlang.ide.bottom_panel import BottomPanel
+    app = GravLangIDE(tk_root)
+    app._pending_output = [f"line {i}" for i in range(500)]
+    app._flush_output()
+    txt = app._bottom_panel.output_txt.get("1.0", "end-1c").splitlines()
+    assert txt[0] == "line 0" and txt[-1] == "line 499" and app._pending_output == []
+    app._pending_output = ["x"] * (BottomPanel.MAX_LINES + 500)
+    app._flush_output()
+    assert int(app._bottom_panel.output_txt.index("end-1c").split(".")[0]) <= BottomPanel.MAX_LINES + 1

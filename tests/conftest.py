@@ -13,3 +13,8 @@ import os
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
+
+# IDE tests change the theme / recent files: keep that out of the developer's real settings.
+import tempfile
+
+os.environ.setdefault("GRAVLANG_CONFIG", os.path.join(tempfile.mkdtemp(prefix="gravlang-test-"), "config.json"))
