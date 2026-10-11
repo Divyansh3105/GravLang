@@ -24,9 +24,13 @@ _STEP_NODES = frozenset({
     "VarDecl", "Assign", "AugAssign", "IfStmt", "WhileStmt",
     "ForStmt", "ForInStmt", "FuncDecl", "ClassDecl",
     "ReturnStmt", "BreakStmt", "ContinueStmt", "ImportStmt",
-    "TryCatchStmt", "ThrowStmt", "FuncCall", "MethodCall",
+    "TryCatchStmt", "ThrowStmt",
     "ArrayAssign", "DictAssign", "AttributeSet",
 })
+
+# Expressions only count as steps when used as a whole statement (`f();`), not
+# when nested in another statement (`let x = f();`), so each line pauses once.
+_EXPR_STMT_NODES = frozenset({"FuncCall", "MethodCall", "CallExpr"})
 
 
 # ── Sentinel for function returns ────────────────────────────────────
@@ -135,7 +139,7 @@ class Interpreter:
     def interpret(self, program: ast.Program) -> None:
         try:
             for stmt in program.body:
-                self._exec(stmt, self.global_env)
+                self._exec_stmt(stmt, self.global_env)
         except ReturnSignal:
             raise GravLangRuntimeError("'return' outside of a function")
         except (BreakSignal, ContinueSignal):
@@ -143,9 +147,16 @@ class Interpreter:
 
     # ── dispatch ─────────────────────────────────────────────────────
 
-    def _exec(self, node, env: Environment):
+    def _exec_stmt(self, node, env: Environment):
+        """Execute a node that sits in statement position (Program / Block body)."""
+        if (self._on_step and type(node).__name__ in _EXPR_STMT_NODES
+                and getattr(node, 'line', None)):
+            self._on_step(node.line, env)
+        return self._exec(node, env)
+
+    def _exec(self, node, env: Environment, step: bool = True):
         cls = type(node)
-        if self._on_step and cls.__name__ in _STEP_NODES and getattr(node, 'line', None):
+        if step and self._on_step and cls.__name__ in _STEP_NODES and getattr(node, 'line', None):
             self._on_step(node.line, env)
 
         visitor = self._visitors.get(cls)
@@ -165,7 +176,7 @@ class Interpreter:
 
     def _visit_Program(self, node: ast.Program, env: Environment):
         for stmt in node.body:
-            self._exec(stmt, env)
+            self._exec_stmt(stmt, env)
 
     def _visit_VarDecl(self, node: ast.VarDecl, env: Environment):
         value = self._exec(node.value, env)
@@ -249,7 +260,7 @@ class Interpreter:
 
     def _visit_ForStmt(self, node: ast.ForStmt, env: Environment):
         loop_env = Environment(parent=env)
-        self._exec(node.init, loop_env)
+        self._exec(node.init, loop_env, step=False)
         try:
             while self._truthy(self._exec(node.condition, loop_env)):
                 self._tick()
@@ -259,7 +270,7 @@ class Interpreter:
                     break
                 except ContinueSignal:
                     pass  # fall through to update (correct for-loop continue)
-                self._exec(node.update, loop_env)
+                self._exec(node.update, loop_env, step=False)
             else:
                 if node.else_body is not None:
                     self._exec(node.else_body, loop_env)
@@ -443,7 +454,7 @@ class Interpreter:
     def _visit_Block(self, node: ast.Block, env: Environment):
         block_env = Environment(parent=env)
         for stmt in node.statements:
-            self._exec(stmt, block_env)
+            self._exec_stmt(stmt, block_env)
 
     def _visit_ThrowStmt(self, node: ast.ThrowStmt, env: Environment):
         val = self._exec(node.value, env)
