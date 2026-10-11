@@ -9,7 +9,7 @@ from .core.environment import Environment
 from .core.errors import GravLangError, ParseError, LexerError, GravLangRuntimeError
 from .core.formatter import format_source, format_file, Formatter
 
-__version__ = "1.0.0.1"
+__version__ = "1.1.0"
 
 __all__ = [
     "Lexer",
