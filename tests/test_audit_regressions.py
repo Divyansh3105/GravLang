@@ -380,3 +380,48 @@ def test_missing_separators_are_errors(src):
 def test_stray_semicolon_and_fstring_braces():
     assert run_grav("if (true) { print(1); };") == ["1"]
     assert run_grav('let n = 2; print(f"{{n}} = {n}");') == ["{n} = 2"]
+
+
+# ══ debugger: stepping and breakpoint tracking ═══════════════════════
+
+def _step_lines(src):
+    from gravlang.core.interpreter import Interpreter
+    seen = []
+    Interpreter(print_fn=lambda *a: None, on_step=lambda line, env: seen.append(line)).interpret(
+        Parser(Lexer(src).tokenize()).parse())
+    return seen
+
+
+def test_one_pause_per_statement_even_on_one_line():
+    # `let x = f(1);` is a single step, not VarDecl + nested call
+    lines = _step_lines("func f(a){ return a; }\nlet x = f(1);\n")
+    assert lines.count(2) == 1
+    # a one-line loop pauses on every iteration's body statement
+    assert _step_lines("let n = 0;\nfor (let i = 0; i < 3; i += 1) { n += 1; }\n").count(2) == 4  # for + 3 bodies
+    # a bare call statement is a step; same line recursion pauses at each level
+    rec = _step_lines("func f(n){ if (n > 0) { f(n - 1); } }\nf(2);\n")
+    assert rec.count(1) > 3
+
+
+def test_breakpoints_and_folds_follow_edits(tk_root):
+    tab = _editor(tk_root, "a;\nb;\nfunc f() {\n  x;\n}\nc;\n")
+    tab.toggle_breakpoint(2)
+    tab.toggle_fold(3)
+    assert tab.breakpoints == {2} and tab.folded_blocks == {3}
+    tab.editor.insert("1.0", "new1\nnew2\n")          # two lines added above
+    assert tab.breakpoints == {4} and tab.folded_blocks == {5}
+    tab.editor.delete("1.0", "2.0")                    # one removed
+    assert tab.breakpoints == {3} and tab.folded_blocks == {4}
+    assert tab.toggle_breakpoint(3) is False           # toggles the moved breakpoint off
+    assert tab.breakpoints == set()
+    assert tab.toggle_fold(4) is False and tab.folded_blocks == set()
+    assert tab.toggle_breakpoint(99) is False          # nonexistent line
+
+
+def test_fold_removed_when_braces_edited_away(tk_root):
+    tab = _editor(tk_root, "func f() {\n  x;\n}\ny;\n")
+    tab.toggle_fold(1)
+    tab.editor.delete("1.9", "1.10")                   # delete the '{'
+    tab._update_line_numbers()
+    assert tab.folded_blocks == set()
+    assert tab.editor.tag_ranges("fold_hidden_fold1") == ()

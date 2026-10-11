@@ -31,9 +31,10 @@ class TestIDEBreakpoints(unittest.TestCase):
         frame = tk.Frame(self.root)
         theme = THEMES["Catppuccin Mocha"]
         tab = EditorTab(frame, theme, on_change_cb=lambda: None, on_cursor_cb=lambda r, c: None)
-        
+        tab.set_content(chr(10).join(f"let v{i} = {i};" for i in range(10)))  # breakpoints need real lines
+
         self.assertEqual(len(tab.breakpoints), 0)
-        
+
         # Toggle line 3 ON
         added = tab.toggle_breakpoint(3)
         self.assertTrue(added)
