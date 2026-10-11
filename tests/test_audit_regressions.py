@@ -19,7 +19,7 @@ from helpers import run_grav
 def _shape(n):
     if dataclasses.is_dataclass(n):
         return (type(n).__name__, tuple(_shape(getattr(n, f.name))
-                for f in dataclasses.fields(n) if f.name != "line"))
+                for f in dataclasses.fields(n) if f.name not in ("line", "end_line")))
     if isinstance(n, (list, tuple)):
         return tuple(_shape(x) for x in n)
     return n
@@ -216,7 +216,7 @@ def test_repl_parse_errors_flag_eof():
 
 def test_lib_files_are_package_data():
     import pathlib
-    import tomllib  # py3.11+
+    tomllib = pytest.importorskip("tomllib")  # py3.11+
     cfg = tomllib.loads((pathlib.Path(__file__).parent.parent / "pyproject.toml").read_text("utf-8"))
     assert "lib/*.grav" in cfg["tool"]["setuptools"]["package-data"]["gravlang"]
 
@@ -425,3 +425,67 @@ def test_fold_removed_when_braces_edited_away(tk_root):
     tab._update_line_numbers()
     assert tab.folded_blocks == set()
     assert tab.editor.tag_ranges("fold_hidden_fold1") == ()
+
+
+# ══ second audit pass ════════════════════════════════════════════════
+
+def test_comment_before_closing_brace_stays_in_block():
+    src = "func f() {\n    x = 1;\n    # last\n}\n# after\ny = 2;\n"
+    out = format_source(src)
+    assert out.index("# last") < out.index("}") < out.index("# after")
+    assert "    # last\n}" in out
+    assert format_source(out) == out
+
+
+def test_big_ints_and_resource_guards():
+    assert run_grav("let x = 1; for (let i = 0; i < 1500; i += 1) { x = x * 3; } "
+                    "print(len(toString(x)));") == ["716"]
+    for src in ('print(2 ** 10 ** 10);', 'print(len("ab" * 10 ** 12));'):
+        with pytest.raises(GravLangError):
+            run_grav(src)
+
+
+def test_print_as_value_and_type_of_functions():
+    assert run_grav("func f(){} class A{} print(type(f), type(A), type(A()), type(print));") == \
+        ["function class A function"]
+
+
+def test_friendly_syntax_errors():
+    with pytest.raises(GravLangError, match="Unterminated string"):
+        run_grav('print("abc);')
+    with pytest.raises(GravLangError, match="elif"):
+        run_grav("if (false) { } else if (true) { }")
+    assert run_grav('print(f"a}b");') == ["a}b"]
+
+
+def test_enter_between_braces(tk_root):
+    tab = _editor(tk_root, "func f() {}")
+    tab.editor.mark_set("insert", "1.10")
+    tab._on_return(None)
+    assert tab.get_content() == "func f() {\n    \n}"
+    assert tab.editor.index("insert") == "2.4"
+
+
+def test_gutter_skips_folded_lines(tk_root):
+    win = tk.Toplevel(tk_root)          # must be mapped for dlineinfo to report lines
+    win.geometry("600x400")
+    tab = EditorTab(win, THEMES["Catppuccin Mocha"], lambda: None, lambda r, c: None)
+    tab.frame.pack(fill="both", expand=True)
+    tab.set_content("a;\nfunc f() {\n  x;\n  y;\n}\nz;\n")
+    win.update()
+    tab.toggle_fold(2)
+    win.update()
+    nums = [tab.ln_canvas.itemcget(i, "text") for i in tab.ln_canvas.find_all()
+            if tab.ln_canvas.type(i) == "text"]
+    assert "3" not in nums and "4" not in nums and "5" not in nums and "6" in nums
+    win.destroy()
+
+
+def test_status_counts_ignore_builtins(tk_root):
+    from gravlang.ide.main_window import GravLangIDE
+    from gravlang.core.interpreter import Interpreter
+    app = GravLangIDE(tk_root)
+    it = Interpreter(print_fn=lambda *a: None)
+    it.interpret(Parser(Lexer("let a = 1; let b = [1];").tokenize()).parse())
+    app._update_scope_stats(dict(it.global_env._store))
+    assert "Vars: 2" in app._status_stats.cget("text")
