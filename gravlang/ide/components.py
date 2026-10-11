@@ -159,7 +159,7 @@ class AutoCompletePopup:
                 seen.add(word)
 
         for word in _AC_BUILTINS:
-            if word.lower().startswith(p) and word not in seen:
+            if word.lower().startswith(p) and word not in seen and word != prefix:
                 lbl = f"{_CAT_ICON['builtin']} {word}"
                 entries.append((lbl, word, "builtin"))
                 seen.add(word)

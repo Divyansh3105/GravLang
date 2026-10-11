@@ -137,6 +137,9 @@ class ProblemsView(tk.Frame):
 class BottomPanel(tk.Frame):
     """Multi-tabbed bottom developer control center."""
 
+    MAX_LINES = 20000    # oldest output is dropped beyond this
+    COLOR_LIMIT = 300    # chunks longer than this are inserted without token colouring
+
     def __init__(self, parent, theme, on_jump_cb=None):
         super().__init__(parent, bg=theme["BG_CRUST"])
         self.theme = theme
@@ -244,8 +247,15 @@ class BottomPanel(tk.Frame):
         else:
             # Auto-colorize typed literals if plain text
             # (IDE messages pass an explicit tag; user output is never treated as an error)
-            for line in text.splitlines(keepends=True):
-                self._insert_typed_line(txt, line)
+            lines = text.splitlines(keepends=True)
+            if len(lines) > self.COLOR_LIMIT:      # big dump: skip per-token colouring
+                txt.insert("end", text)
+            else:
+                for line in lines:
+                    self._insert_typed_line(txt, line)
+        total = int(txt.index("end-1c").split(".")[0])
+        if total > self.MAX_LINES:                 # keep memory / redraw cost bounded
+            txt.delete("1.0", f"{total - self.MAX_LINES}.0")
         txt.configure(state="disabled")
         txt.see("end")
 

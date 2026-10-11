@@ -755,6 +755,23 @@ class EditorTab:
         self._update_line_numbers()
         self.modified = False
         self._last_text = self.get_content()
+        self.editor.edit_reset()   # loading a file must not be undoable (Ctrl+Z would empty it)
+
+    def replace_content(self, text):
+        """Replace the whole text as ONE undoable step (used by Format); keeps the cursor line."""
+        ed = self.editor
+        line = ed.index("insert").split(".")[0]
+        ed.configure(autoseparators=False)
+        try:
+            ed.edit_separator()
+            ed.delete("1.0", "end")
+            ed.insert("1.0", text)
+            ed.edit_separator()
+        finally:
+            ed.configure(autoseparators=True)
+        total = int(ed.index("end-1c").split(".")[0])
+        ed.mark_set("insert", f"{min(int(line), total)}.0")
+        self.notify_edited()
 
     def name(self):
         return os.path.basename(self.filepath) if self.filepath else "untitled.grav"

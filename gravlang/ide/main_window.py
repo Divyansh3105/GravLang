@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import os, sys, json, time, threading, re
 from datetime import datetime
-from .themes import THEMES, CONFIG_FILE
+from .themes import THEMES, CONFIG_FILE, LEGACY_CONFIG_FILE
 from .constants import *
 from .components import VariableInspector, FileExplorer, _simple_dialog, FindReplaceBar, apply_ttk_styles
 from .editor import EditorTab
@@ -82,6 +82,7 @@ class GravLangIDE:
         self._step_event   = threading.Event()
         self._last_paused_line = -1
         self._active_input_event: threading.Event | None = None
+        self._pending_output: list[str] = []
 
         self.root.configure(bg=self.theme["BG_BASE"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
@@ -700,7 +701,7 @@ class GravLangIDE:
 
         # read first: a failed open must not touch recents or hide the welcome view
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
+            with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
                 content = f.read()
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -757,7 +758,7 @@ class GravLangIDE:
             from ..core.formatter import format_source
             formatted = format_source(code)
             if formatted != code:
-                tab.set_content(formatted)
+                tab.replace_content(formatted)   # one Ctrl+Z restores the original
                 tab.modified = True
                 self._update_title()
         except Exception as e:
@@ -796,6 +797,8 @@ class GravLangIDE:
         self._set_status_running()
         self._is_running = True
         self._cancel_flag = False
+        self._pending_output = []
+        self._schedule_flush()
         self.root.update_idletasks()   # flush the UI so "Running…" shows up
         t_start = time.time()
         lines: list[str] = []
@@ -803,8 +806,9 @@ class GravLangIDE:
         def capture(*args):  # accept multiple args like print(a, b)
             text = " ".join(str(a) for a in args)
             lines.append(text)
-            # Stream output live to the panel (crucial for interactive input() programs)
-            self.root.after(0, lambda t=text: self._append_output(t + "\n"))
+            # Queue for the UI thread, which flushes in batches every ~40 ms: one widget
+            # update per print() made 30k lines take 100 s, and it still streams live.
+            self._pending_output.append(text)
 
         # ── GUI input hook ─────────────────────────────────────────────────
         # Called from the background run-thread when GravLang code calls input().
@@ -819,6 +823,7 @@ class GravLangIDE:
                 p_text = str(prompt) if prompt else "Input:"
                 if p_text and not p_text.endswith(" ") and not p_text.endswith(":"):
                     p_text += ":"
+                self._flush_output()          # earlier prints must appear before the prompt
                 if prompt:
                     self._append_output(str(prompt))
 
@@ -1071,7 +1076,21 @@ class GravLangIDE:
             evt.set()
         self._append_output("⚠ Stop requested — waiting for current operation...\n", "error")
 
+    def _flush_output(self):
+        """(UI thread) move queued print() output into the output panel in one update."""
+        pending = getattr(self, "_pending_output", None)
+        if pending:
+            chunk = pending[:]
+            del pending[:len(chunk)]
+            self._append_output("\n".join(chunk) + "\n")
+
+    def _schedule_flush(self):
+        self._flush_output()
+        if getattr(self, "_is_running", False):
+            self.root.after(40, self._schedule_flush)
+
     def _finish_run(self, lines, errors, elapsed, store):
+        self._flush_output()
         self._is_running = False  # clear running guard
         tab = self._run_tab_or_active()
         if tab:
@@ -1535,14 +1554,19 @@ class GravLangIDE:
     # ── CONFIG ────────────────────────────────────────────────────────────────
 
     def _load_config(self):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {}
+        for path in (CONFIG_FILE, LEGACY_CONFIG_FILE):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                continue
+        return {}
 
     def _save_config(self):
         try:
+            os.makedirs(os.path.dirname(CONFIG_FILE) or ".", exist_ok=True)
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump({
                     "theme": self.theme_name,

@@ -39,4 +39,16 @@ THEMES = {
     ),
 }
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), ".gravlang_config.json")
+def _default_config_file() -> str:
+    """Per-user settings file. (Next to the code it would be lost in the one-file
+    .exe's temp folder and fail in read-only installs.) GRAVLANG_CONFIG overrides it."""
+    override = os.environ.get("GRAVLANG_CONFIG")
+    if override:
+        return override
+    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "GravLang", "config.json")
+
+
+CONFIG_FILE = _default_config_file()
+# settings file used before v1.0.0.1; read once as a fallback so nothing is lost
+LEGACY_CONFIG_FILE = os.path.join(os.path.dirname(__file__), ".gravlang_config.json")
