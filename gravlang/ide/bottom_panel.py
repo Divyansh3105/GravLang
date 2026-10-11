@@ -4,6 +4,7 @@ import re
 import threading
 from typing import Sequence
 from .themes import THEMES
+from .components import apply_ttk_styles
 
 from typing import TYPE_CHECKING
 
@@ -71,6 +72,7 @@ class ProblemsView(tk.Frame):
             borderwidth=0,
         )
         style.map("Problems.Treeview", background=[("selected", t["BG_SURFACE1"])])
+        apply_ttk_styles(t)
 
         self.tree = ttk.Treeview(
             self,
@@ -87,7 +89,7 @@ class ProblemsView(tk.Frame):
         self.tree.column("line", width=60, minwidth=60, stretch=False, anchor="center")
         self.tree.column("message", width=400, stretch=True, anchor="w")
 
-        vsb = tk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
 
         vsb.pack(side="right", fill="y")
@@ -129,6 +131,7 @@ class ProblemsView(tk.Frame):
         )
         style.configure("Problems.Treeview.Heading", background=t["BG_MANTLE"], foreground=t["TEXT_SUB"])
         style.map("Problems.Treeview", background=[("selected", t["BG_SURFACE1"])])
+        apply_ttk_styles(t)
 
 
 class BottomPanel(tk.Frame):
@@ -189,7 +192,7 @@ class BottomPanel(tk.Frame):
             wrap="word",
             bd=0,
         )
-        self.output_vsb = tk.Scrollbar(self.out_frame, orient="vertical", command=self.output_txt.yview)
+        self.output_vsb = ttk.Scrollbar(self.out_frame, orient="vertical", command=self.output_txt.yview)
         self.output_txt.configure(yscrollcommand=self.output_vsb.set)
         self.output_vsb.pack(side="right", fill="y")
         self.output_txt.pack(fill="both", expand=True, padx=4, pady=4)

@@ -4,7 +4,7 @@ import os, sys, json, time, threading, re
 from datetime import datetime
 from .themes import THEMES, CONFIG_FILE
 from .constants import *
-from .components import VariableInspector, FileExplorer, _simple_dialog, FindReplaceBar
+from .components import VariableInspector, FileExplorer, _simple_dialog, FindReplaceBar, apply_ttk_styles
 from .editor import EditorTab
 from .compiler_view import CompilerStagesWindow
 from .bottom_panel import BottomPanel
@@ -207,10 +207,11 @@ class GravLangIDE:
                 activebackground=t["BG_SURFACE0"] if not accent else t["TEAL"],
                 activeforeground=fg, bd=0, highlightthickness=0)
             b.pack(side="left", padx=1, pady=3)
+            # colours resolved at event time so a theme switch is never undone by hover
             b.bind("<Enter>", lambda e, w=b: w.configure(
-                bg=t["BG_SURFACE0"] if not accent else t["TEAL"]))
+                bg=self.theme["TEAL"] if accent else self.theme["BG_SURFACE0"]))
             b.bind("<Leave>", lambda e, w=b: w.configure(
-                bg=bg))
+                bg=self.theme["BLUE"] if accent else self.theme["BG_MANTLE"]))
             return b
 
         def sep():
@@ -230,8 +231,8 @@ class GravLangIDE:
             font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
             activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
         stg_btn.pack(side="left", padx=1, pady=3)
-        stg_btn.bind("<Enter>", lambda e: stg_btn.configure(bg=t["BG_SURFACE0"]))
-        stg_btn.bind("<Leave>", lambda e: stg_btn.configure(bg=t["BG_MANTLE"]))
+        stg_btn.bind("<Enter>", lambda e: stg_btn.configure(bg=self.theme["BG_SURFACE0"]))
+        stg_btn.bind("<Leave>", lambda e: stg_btn.configure(bg=self.theme["BG_MANTLE"]))
         sep()
         # Examples dropdown
         ex_btn = tk.Button(bar, text="📚 Examples ▾", command=self._show_examples,
@@ -239,8 +240,8 @@ class GravLangIDE:
             font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
             activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
         ex_btn.pack(side="left", padx=1, pady=3)
-        ex_btn.bind("<Enter>", lambda e: ex_btn.configure(bg=t["BG_SURFACE0"]))
-        ex_btn.bind("<Leave>", lambda e: ex_btn.configure(bg=t["BG_MANTLE"]))
+        ex_btn.bind("<Enter>", lambda e: ex_btn.configure(bg=self.theme["BG_SURFACE0"]))
+        ex_btn.bind("<Leave>", lambda e: ex_btn.configure(bg=self.theme["BG_MANTLE"]))
 
         btn("🔍 Find", self._toggle_find)
         sep()
@@ -250,16 +251,16 @@ class GravLangIDE:
             font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
             activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
         th_btn.pack(side="right", padx=1, pady=3)
-        th_btn.bind("<Enter>", lambda e: th_btn.configure(bg=t["BG_SURFACE0"]))
-        th_btn.bind("<Leave>", lambda e: th_btn.configure(bg=t["BG_MANTLE"]))
+        th_btn.bind("<Enter>", lambda e: th_btn.configure(bg=self.theme["BG_SURFACE0"]))
+        th_btn.bind("<Leave>", lambda e: th_btn.configure(bg=self.theme["BG_MANTLE"]))
 
         hlp_btn = tk.Button(bar, text="? Shortcuts", command=self._show_shortcuts,
             bg=t["BG_MANTLE"], fg=t["TEXT_MAIN"], relief="flat",
             font=("Segoe UI", 10, "bold"), padx=10, pady=4, cursor="hand2",
             activebackground=t["BG_SURFACE0"], bd=0, highlightthickness=0)
         hlp_btn.pack(side="right", padx=1, pady=3)
-        hlp_btn.bind("<Enter>", lambda e: hlp_btn.configure(bg=t["BG_SURFACE0"]))
-        hlp_btn.bind("<Leave>", lambda e: hlp_btn.configure(bg=t["BG_MANTLE"]))
+        hlp_btn.bind("<Enter>", lambda e: hlp_btn.configure(bg=self.theme["BG_SURFACE0"]))
+        hlp_btn.bind("<Leave>", lambda e: hlp_btn.configure(bg=self.theme["BG_MANTLE"]))
 
         # self._run_button is the primary reference; _run_btn kept for compat
         self._run_btn = self._run_button
@@ -398,8 +399,8 @@ class GravLangIDE:
         self._sash.bind("<B1-Motion>",        _sash_drag)
         self._sash.bind("<ButtonRelease-1>",  _sash_release)
         # Highlight sash on hover
-        self._sash.bind("<Enter>", lambda e: self._sash.configure(bg=t["BLUE"]))
-        self._sash.bind("<Leave>", lambda e: self._sash.configure(bg=t["BG_SURFACE1"]))
+        self._sash.bind("<Enter>", lambda e: self._sash.configure(bg=self.theme["BLUE"]))
+        self._sash.bind("<Leave>", lambda e: self._sash.configure(bg=self.theme["BG_SURFACE1"]))
 
         # ── Main bottom container ────────────────────────────────────────────
         self._bottom = tk.Frame(self._right, bg=t["BG_CRUST"], height=220)
@@ -420,7 +421,7 @@ class GravLangIDE:
         def _toggle_clear_on_run():
             state = self._clear_on_run.get()
             clr_lbl.configure(
-                fg=t["BLUE"] if state else t["TEXT_SUB"],
+                fg=self.theme["BLUE"] if state else self.theme["TEXT_SUB"],
                 text="⟳ Clear on Run ✓" if state else "⟳ Clear on Run",
             )
 
@@ -434,9 +435,9 @@ class GravLangIDE:
             self._clear_on_run.set(not self._clear_on_run.get()),
             _toggle_clear_on_run(),
         ))
-        clr_lbl.bind("<Enter>", lambda e: clr_lbl.configure(fg=t["BLUE"]))
+        clr_lbl.bind("<Enter>", lambda e: clr_lbl.configure(fg=self.theme["BLUE"]))
         clr_lbl.bind("<Leave>", lambda e: clr_lbl.configure(
-            fg=t["BLUE"] if self._clear_on_run.get() else t["TEXT_SUB"]))
+            fg=self.theme["BLUE"] if self._clear_on_run.get() else self.theme["TEXT_SUB"]))
         self._clr_lbl = clr_lbl
 
         tk.Button(hdr, text="📋 Copy", command=self._copy_output,
@@ -782,6 +783,7 @@ class GravLangIDE:
             return
             
         run_tab = tab   # breakpoints / highlighting belong to the tab being run
+        self._run_tab = run_tab
         self._is_stepping = is_stepping
         self._last_paused_line = -1
 
@@ -1050,11 +1052,16 @@ class GravLangIDE:
         self._run_thread = threading.Thread(target=_run_in_thread, daemon=True)
         self._run_thread.start()
 
+    def _run_tab_or_active(self):
+        """The tab the current/last run belongs to (it may no longer be the active one)."""
+        tab = getattr(self, "_run_tab", None)
+        return tab if tab in self._tabs else self._active_tab()
+
     def _stop_code(self):
         """Signal the running thread to stop; show cancellation message."""
         self._cancel_flag = True
         self._step_event.set()
-        tab = self._active_tab()
+        tab = self._run_tab_or_active()
         if tab:
             tab.set_paused_line(None)
         if hasattr(self, "_input_bar"):
@@ -1066,7 +1073,7 @@ class GravLangIDE:
 
     def _finish_run(self, lines, errors, elapsed, store):
         self._is_running = False  # clear running guard
-        tab = self._active_tab()
+        tab = self._run_tab_or_active()
         if tab:
             tab.editor.tag_remove("step_highlight", "1.0", "end")
             tab.set_paused_line(None)
@@ -1294,36 +1301,59 @@ class GravLangIDE:
         except Exception:
             pass
 
-    _COLOR_OPTS = ("bg", "fg", "activebackground", "activeforeground", "insertbackground",
-                   "highlightbackground", "highlightcolor", "selectbackground",
-                   "selectforeground", "troughcolor", "disabledforeground")
+    _BG_OPTS = ("bg", "activebackground", "highlightbackground", "selectbackground", "troughcolor")
+    _FG_OPTS = ("fg", "activeforeground", "insertbackground", "selectforeground",
+                "highlightcolor", "disabledforeground")
+    # Several keys can share one colour (e.g. BLUE == STATUS_BG). When mapping an old
+    # colour back to a key, prefer the keys that make sense for that kind of option.
+    _BG_KEY_ORDER = ("BG_BASE", "BG_MANTLE", "BG_CRUST", "BG_SURFACE0", "BG_SURFACE1", "BLUE", "TEAL",
+                     "GREEN", "MAUVE", "PEACH", "RED", "LAVENDER", "STATUS_BG", "TEXT_MAIN",
+                     "TEXT_SUB", "TEXT_OVERLAY", "STATUS_FG", "FG_CURSOR")
+    _FG_KEY_ORDER = ("TEXT_MAIN", "TEXT_SUB", "TEXT_OVERLAY", "BLUE", "TEAL", "GREEN", "MAUVE", "PEACH",
+                     "RED", "LAVENDER", "STATUS_FG", "FG_CURSOR", "BG_BASE", "BG_MANTLE", "BG_CRUST",
+                     "BG_SURFACE0", "BG_SURFACE1", "STATUS_BG")
 
-    def _retheme_widgets(self, widget, mapping: dict):
+    @staticmethod
+    def _color_map(old: dict, new: dict, order) -> dict:
+        mapping: dict[str, str] = {}
+        for key in order:
+            if key in old and key in new:
+                mapping.setdefault(old[key].lower(), new[key])
+        return mapping
+
+    def _retheme_widgets(self, widget, bg_map: dict, fg_map: dict, skip=()):
         """Swap any colour option holding an old-theme value for the new theme's."""
-        for opt in self._COLOR_OPTS:
-            try:
-                cur = str(widget.cget(opt)).lower()
-            except tk.TclError:
-                continue
-            if cur in mapping:
+        if widget in skip:
+            return
+        for opts, mapping in ((self._BG_OPTS, bg_map), (self._FG_OPTS, fg_map)):
+            for opt in opts:
                 try:
-                    widget.configure(**{opt: mapping[cur]})
+                    cur = str(widget.cget(opt)).lower()
                 except tk.TclError:
-                    pass
+                    continue
+                if cur in mapping:
+                    try:
+                        widget.configure(**{opt: mapping[cur]})
+                    except tk.TclError:
+                        pass
         for child in widget.winfo_children():
-            self._retheme_widgets(child, mapping)
+            self._retheme_widgets(child, bg_map, fg_map, skip)
 
     def apply_theme(self, name: str):
         if name not in THEMES: return
         old = self.theme
-        mapping: dict[str, str] = {}
-        for key, val in old.items():
-            if isinstance(val, str) and key in THEMES[name]:
-                mapping.setdefault(val.lower(), THEMES[name][key])
+        new = THEMES[name]
+        bg_map = self._color_map(old, new, self._BG_KEY_ORDER)
+        fg_map = self._color_map(old, new, self._FG_KEY_ORDER)
         self.theme_name = name
-        self.theme = THEMES[name]
+        self.theme = new
         t = self.theme
-        self._retheme_widgets(self.root, mapping)
+        self._retheme_widgets(self.root, bg_map, fg_map, skip=(self._statusbar,))
+        # status bar: its colours are STATUS_BG/STATUS_FG, which can collide with BLUE etc.
+        status_bg = {**bg_map, old["STATUS_BG"].lower(): new["STATUS_BG"]}
+        status_fg = {**fg_map, old["STATUS_FG"].lower(): new["STATUS_FG"]}
+        self._retheme_widgets(self._statusbar, status_bg, status_fg)
+        apply_ttk_styles(t)
         self._bottom_panel.apply_theme(t)
         if hasattr(self, "_welcome_view"):
             self._welcome_view.apply_theme(t)

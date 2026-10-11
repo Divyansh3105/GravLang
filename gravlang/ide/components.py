@@ -5,6 +5,36 @@ import os
 from .constants import *
 from .constants import _AC_KEYWORDS, _AC_BUILTINS, _CAT_ICON
 
+def apply_ttk_styles(t: dict):
+    """(Re)configure every ttk style the IDE uses; call again after a theme change."""
+    style = ttk.Style()
+    style.theme_use("default")
+    style.configure("Insp.Treeview",
+        background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
+        foreground=t["TEXT_MAIN"], rowheight=20, font=("Consolas", 10), borderwidth=0)
+    style.configure("Insp.Treeview.Heading",
+        background=t["BG_SURFACE0"], foreground=t["TEXT_SUB"],
+        font=("Segoe UI", 9, "bold"), borderwidth=0)
+    style.map("Insp.Treeview",
+        background=[("selected", t["BG_SURFACE1"])],
+        foreground=[("selected", t["TEXT_MAIN"])])
+    style.configure("Exp.Treeview",
+        background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
+        foreground=t["TEXT_MAIN"], rowheight=28, font=("Segoe UI", 10), borderwidth=0)
+    style.configure("Exp.Treeview.Heading",
+        background=t["BG_MANTLE"], foreground=t["TEXT_SUB"], font=("Segoe UI", 9))
+    style.map("Exp.Treeview",
+        background=[("selected", t["BG_SURFACE0"])],
+        foreground=[("selected", t["BLUE"])])
+    for orient in ("Vertical", "Horizontal"):
+        style.configure(f"{orient}.TScrollbar",
+            background=t["BG_SURFACE1"], troughcolor=t["BG_MANTLE"],
+            bordercolor=t["BG_MANTLE"], arrowcolor=t["TEXT_OVERLAY"],
+            lightcolor=t["BG_SURFACE1"], darkcolor=t["BG_SURFACE1"])
+        style.map(f"{orient}.TScrollbar",
+            background=[("active", t["BG_SURFACE0"]), ("pressed", t["BLUE"])])
+
+
 class LintTooltip:
     """Small floating label that shows an error message near the cursor.
 
@@ -431,18 +461,7 @@ class VariableInspector(tk.Frame):
                  fg=t["TEXT_SUB"], font=("Segoe UI", 9, "bold")).pack(
                  side="left", padx=6, pady=4)
 
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("Insp.Treeview",
-            background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
-            foreground=t["TEXT_MAIN"], rowheight=20,
-            font=("Consolas", 10))
-        style.configure("Insp.Treeview.Heading",
-            background=t["BG_SURFACE0"], foreground=t["TEXT_SUB"],
-            font=("Segoe UI", 9, "bold"))
-        style.map("Insp.Treeview",
-            background=[("selected", t["BG_SURFACE1"])],
-            foreground=[("selected", t["TEXT_MAIN"])])
+        apply_ttk_styles(t)
 
         self.tree = ttk.Treeview(self, style="Insp.Treeview",
             columns=("Name", "Value"), show="headings", selectmode="browse")
@@ -458,8 +477,12 @@ class VariableInspector(tk.Frame):
     def _apply_theme(self, theme):
         self.theme = theme
         self.configure(bg=theme["BG_MANTLE"])
+        apply_ttk_styles(theme)
+        if getattr(self, "_last_store", None) is not None:
+            self.populate(self._last_store)   # row colours depend on the theme
 
     def populate(self, store: dict):
+        self._last_store = store
         for item in self.tree.get_children():
             self.tree.delete(item)
         t = self.theme
@@ -518,16 +541,7 @@ class FileExplorer(tk.Frame):
                  fg=t["TEXT_SUB"], font=("Segoe UI", 9, "bold")).pack(
                  side="left", padx=8, pady=5)
 
-        style = ttk.Style()
-        style.configure("Exp.Treeview",
-            background=t["BG_MANTLE"], fieldbackground=t["BG_MANTLE"],
-            foreground=t["TEXT_MAIN"], rowheight=28, font=("Segoe UI", 10))
-        style.configure("Exp.Treeview.Heading",
-            background=t["BG_MANTLE"], foreground=t["TEXT_SUB"],
-            font=("Segoe UI", 9))
-        style.map("Exp.Treeview",
-            background=[("selected", t["BG_SURFACE0"])],
-            foreground=[("selected", t["BLUE"])])
+        apply_ttk_styles(t)
 
         self.tree = ttk.Treeview(self, style="Exp.Treeview", show="tree",
                                  selectmode="browse")
@@ -551,6 +565,10 @@ class FileExplorer(tk.Frame):
     def _apply_theme(self, theme):
         self.theme = theme
         self.configure(bg=theme["BG_MANTLE"])
+        apply_ttk_styles(theme)
+        self.ctx_menu.configure(bg=theme["BG_SURFACE0"], fg=theme["TEXT_MAIN"],
+                                activebackground=theme["BG_SURFACE1"],
+                                activeforeground=theme["TEXT_MAIN"])
 
     def set_cwd(self, path):
         self._cwd = path

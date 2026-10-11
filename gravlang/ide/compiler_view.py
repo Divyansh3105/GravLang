@@ -159,7 +159,7 @@ class CompilerStagesWindow:
             # Scrollable text area
             frm = tk.Frame(col, bg=t["BG_BASE"])
             frm.pack(fill="both", expand=True, pady=(2, 0))
-            sb = tk.Scrollbar(frm, orient="vertical")
+            sb = ttk.Scrollbar(frm, orient="vertical")
             txt = tk.Text(
                 frm,
                 bg=t["BG_BASE"], fg=t["TEXT_MAIN"],

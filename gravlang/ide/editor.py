@@ -93,9 +93,9 @@ class EditorTab:
             undo=True,
             tabs=("40p",),
         )
-        self.vsb = tk.Scrollbar(self.container, orient="vertical",
+        self.vsb = ttk.Scrollbar(self.container, orient="vertical",
                                 command=self._on_yscroll)
-        self.hsb = tk.Scrollbar(self._frame, orient="horizontal",
+        self.hsb = ttk.Scrollbar(self._frame, orient="horizontal",
                                 command=self.editor.xview)
         self.editor.configure(yscrollcommand=self._on_yscroll_set,
                               xscrollcommand=self.hsb.set)
