@@ -203,3 +203,4 @@ Thumbs.db
 # GravLang IDE per-user settings
 .gravlang_config.json
 .playwright-mcp/
+brag-output/
